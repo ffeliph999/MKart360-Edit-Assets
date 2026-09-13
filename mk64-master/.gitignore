@@ -105,16 +105,24 @@ mingw64/
 
 # torch
 torch.hash.yml
-
-# Required generated-source wrappers/declarations for Xbox 360 public build
-!include/assets/*.h
+# Xbox 360 public-build source that must stay tracked.
+# These are source wrappers/declarations or text metadata, not extracted media payloads.
+!/include/assets/
+!/include/assets/*.h
+!/assets/course_metadata/
+!/assets/course_metadata/*.inc.c
 !/assets/code/ceremony_data/
 !/assets/code/ceremony_data/ceremony_data.c
+!/assets/code/ceremony_rsp_init_80284EE0/
+!/assets/code/ceremony_rsp_init_80284EE0/ceremony_rsp_init_80284EE0.c
 !/assets/code/common_data/
 !/assets/code/common_data/common_data.c
 !/assets/code/data_800E45C0/
 !/assets/code/data_800E45C0/data_800E45C0.c
 !/assets/code/data_800E8700/
 !/assets/code/data_800E8700/data_800E8700.c
+!/assets/code/rainbow_road_tluts/
+!/assets/code/rainbow_road_tluts/rainbow_road_tluts.c
 !/assets/code/startup_logo/
 !/assets/code/startup_logo/startup_logo.c
+

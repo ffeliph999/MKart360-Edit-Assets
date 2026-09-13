@@ -250,23 +250,91 @@ def verify_gold_source(root, hashes):
 
 
 def verify_project(root):
-    project=(root.parent/'MK64'/'MK64.vcxproj')
+    project = root.parent / 'MK64' / 'MK64.vcxproj'
     if not project.is_file():
-        print("NOTE: MK64.vcxproj was not found next to mk64-master; compile-file check skipped.")
+        print("NOTE: MK64.vcxproj was not found next to mk64-master; project dependency check skipped.")
         return
-    ns='http://schemas.microsoft.com/developer/msbuild/2003'
-    tree=ET.parse(project)
-    missing=[]
-    for n in tree.getroot().iter('{%s}ClCompile'%ns):
-        inc=n.attrib.get('Include','')
-        if not inc: continue
-        # Project uses Windows paths relative to MK64 directory.
-        s=inc.replace('\\','/')
-        if s.startswith('../mk64-master/'):
-            p=root/s[len('../mk64-master/'):]
-            if not p.is_file(): missing.append(s)
-    if missing:
-        die("project still has missing C/C++ compile inputs after preparation:\n  " + "\n  ".join(missing[:50]))
+
+    ns = 'http://schemas.microsoft.com/developer/msbuild/2003'
+    tree = ET.parse(project)
+    compile_files = []
+    missing_compile = []
+    for n in tree.getroot().iter('{%s}ClCompile' % ns):
+        inc = n.attrib.get('Include', '')
+        if not inc:
+            continue
+        rel = inc.replace('\\', '/')
+        if rel.startswith('../mk64-master/'):
+            p = root / rel[len('../mk64-master/'):]
+            if p.is_file():
+                compile_files.append(p.resolve())
+            else:
+                missing_compile.append(rel)
+
+    if missing_compile:
+        die("project still has missing C/C++ compile inputs after preparation:\n  " +
+            "\n  ".join(missing_compile[:100]))
+
+    # The Visual Studio project has a fixed set of local include roots. Walk all
+    # project translation units recursively so missing generated .inc.c/.h files
+    # are caught here instead of much later by MSBuild.
+    include_dirs = [
+        root,
+        root / 'include',
+        root / 'src',
+        root / 'src' / 'racing',
+        root / 'src' / 'ending',
+        root / 'src' / 'audio',
+        root / 'src' / 'data',
+        root / 'courses',
+    ]
+    include_re = re.compile(r'^\s*#\s*include\s*[<\"]([^>\"]+)[>\"]', re.M)
+    local_prefixes = (
+        'assets/', 'courses/', 'textures/', 'src/', 'data/', 'xbox360/',
+        'PR/', 'ultra64.h', 'macros.h', 'defines.h', 'types.h', 'config.h'
+    )
+
+    seen = set()
+    queue = list(compile_files)
+    missing_local = set()
+
+    while queue:
+        src = queue.pop()
+        if src in seen or not src.is_file():
+            continue
+        seen.add(src)
+        try:
+            text = src.read_text(encoding='utf-8', errors='ignore')
+        except OSError:
+            continue
+
+        for name in include_re.findall(text):
+            name = name.replace('\\', '/')
+            candidates = [src.parent / name] + [d / name for d in include_dirs]
+            resolved = next((p.resolve() for p in candidates if p.is_file()), None)
+            if resolved is not None:
+                try:
+                    resolved.relative_to(root.resolve())
+                except ValueError:
+                    continue
+                # Recurse into local source/header/include fragments.
+                if resolved.suffix.lower() in ('.c', '.h', '.hpp', '.inl') or resolved.name.endswith('.inc.c'):
+                    queue.append(resolved)
+                continue
+
+            # Ignore XDK/system headers, but require all paths that clearly refer
+            # to this source tree or to generated include fragments.
+            is_local = name.endswith('.inc.c') or name.endswith('.linkonly.h') or name.startswith(local_prefixes)
+            if is_local:
+                try:
+                    relsrc = str(src.relative_to(root)).replace('\\', '/')
+                except ValueError:
+                    relsrc = str(src)
+                missing_local.add(f"{name}  (included by {relsrc})")
+
+    if missing_local:
+        die("project still has missing local include dependencies after preparation:\n  " +
+            "\n  ".join(sorted(missing_local)[:100]))
 
 
 def main():
