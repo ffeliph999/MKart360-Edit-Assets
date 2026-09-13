@@ -105,3 +105,16 @@ mingw64/
 
 # torch
 torch.hash.yml
+
+# Required generated-source wrappers/declarations for Xbox 360 public build
+!include/assets/*.h
+!/assets/code/ceremony_data/
+!/assets/code/ceremony_data/ceremony_data.c
+!/assets/code/common_data/
+!/assets/code/common_data/common_data.c
+!/assets/code/data_800E45C0/
+!/assets/code/data_800E45C0/data_800E45C0.c
+!/assets/code/data_800E8700/
+!/assets/code/data_800E8700/data_800E8700.c
+!/assets/code/startup_logo/
+!/assets/code/startup_logo/startup_logo.c
