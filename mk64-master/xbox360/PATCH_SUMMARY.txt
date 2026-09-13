@@ -1,0 +1,28 @@
+Modified original file:
+  src/main.c
+    - includes xbox360/platform.h under XBOX360_PORT
+    - native controller polling
+    - audio task dispatch seam
+    - display-list interpreter seam
+    - Xbox present/pacing path
+
+Added:
+  include/xbox360/platform.h
+  include/xbox360/gfx_pc.c
+  include/xbox360/gfx_pc.h
+  include/xbox360/gfx_cc.c
+  include/xbox360/gfx_cc.h
+  include/xbox360/gfx_rendering_api.h
+  include/xbox360/gfx_window_manager_api.h
+  src/xbox360/xbox360_entry.cpp
+  src/xbox360/xbox360_video.cpp
+  src/xbox360/xbox360_input.cpp
+  src/xbox360/xbox360_audio.cpp
+  src/xbox360/xbox360_audio_hle.cpp
+  src/xbox360/xbox360_renderer.cpp
+  src/xbox360/xbox360_window_api.cpp
+  src/xbox360/xbox360_gfx_bridge.c
+  xbox360/BUILD_FIRST.txt
+  xbox360/PORT_STATUS.md
+  xbox360/SOURCE_AUDIT.txt
+  xbox360/prepare_xdk_project.py

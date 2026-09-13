@@ -1,0 +1,90 @@
+--- /mnt/data/mk64-xbox360-port-v1/mk64-master/xbox360/main.c.original	2026-09-09 05:17:38.264061503 +0000
++++ /mnt/data/mk64-xbox360-port-v1/mk64-master/src/main.c	2026-09-09 05:17:38.259084658 +0000
+@@ -11,6 +11,9 @@
+ 
+ #include "profiler.h"
+ #include "main.h"
++#ifdef XBOX360_PORT
++#include "xbox360/platform.h"
++#endif
+ #include "racing/memory.h"
+ #include "menus.h"
+ #include <segments.h>
+@@ -346,11 +349,15 @@
+ }
+ 
+ void read_controllers(void) {
++#ifndef XBOX360_PORT
+     OSMesg msg;
+ 
+     osContStartReadData(&gSIEventMesgQueue);
+     osRecvMesg(&gSIEventMesgQueue, &msg, OS_MESG_BLOCK);
+     osContGetReadData(gControllerPads);
++#else
++    x360_read_controllers(gControllerPads, 4);
++#endif
+     update_controller(0);
+     update_controller(1);
+     update_controller(2);
+@@ -379,11 +386,18 @@
+ }
+ 
+ void dispatch_audio_sptask(struct SPTask* spTask) {
++#ifdef XBOX360_PORT
++    x360_dispatch_audio_task(spTask);
++#else
+     osWritebackDCacheAll();
+     osSendMesg(&gSPTaskMesgQueue, spTask, OS_MESG_NOBLOCK);
++#endif
+ }
+ 
+ void exec_display_list(struct SPTask* spTask) {
++#ifdef XBOX360_PORT
++    x360_exec_sp_task(spTask);
++#else
+     osWritebackDCacheAll();
+     spTask->state = SPTASK_STATE_NOT_STARTED;
+     if (sCurrentDisplaySPTask == NULL) {
+@@ -393,6 +407,7 @@
+     } else {
+         sNextDisplaySPTask = spTask;
+     }
++#endif
+ }
+ 
+ /**
+@@ -458,6 +473,17 @@
+  * Selects the next framebuffer to be rendered and displayed.
+  */
+ void display_and_vsync(void) {
++#ifdef XBOX360_PORT
++    profiler_log_thread5_time(BEFORE_DISPLAY_LISTS);
++    exec_display_list(&gGfxPool->spTask);
++    profiler_log_thread5_time(AFTER_DISPLAY_LISTS);
++    x360_present_and_pace();
++    profiler_log_thread5_time(THREAD5_END);
++
++    if (++sRenderedFramebuffer == 3) sRenderedFramebuffer = 0;
++    if (++sRenderingFramebuffer == 3) sRenderingFramebuffer = 0;
++    gGlobalTimer++;
++#else
+     profiler_log_thread5_time(BEFORE_DISPLAY_LISTS);
+     osRecvMesg(&gGfxVblankQueue, &gMainReceivedMesg, OS_MESG_BLOCK);
+     exec_display_list(&gGfxPool->spTask);
+@@ -468,13 +494,10 @@
+     osRecvMesg(&gGameVblankQueue, &gMainReceivedMesg, OS_MESG_BLOCK);
+     crash_screen_set_framebuffer(gPhysicalFramebuffers[sRenderedFramebuffer]);
+ 
+-    if (++sRenderedFramebuffer == 3) {
+-        sRenderedFramebuffer = 0;
+-    }
+-    if (++sRenderingFramebuffer == 3) {
+-        sRenderingFramebuffer = 0;
+-    }
++    if (++sRenderedFramebuffer == 3) sRenderedFramebuffer = 0;
++    if (++sRenderingFramebuffer == 3) sRenderingFramebuffer = 0;
+     gGlobalTimer++;
++#endif
+ }
+ 
+ void init_segment_ending_sequences(void) {

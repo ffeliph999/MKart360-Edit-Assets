@@ -1,0 +1,33 @@
+#ifndef _ULTRA64_UCODE_H_
+#define _ULTRA64_UCODE_H_
+
+#define SP_DRAM_STACK_SIZE8 0x400
+#define SP_UCODE_SIZE 0x1000
+#define SP_UCODE_DATA_SIZE 0x800
+
+// standard boot ucode
+extern u64 rspF3DBootStart[], rspF3DBootEnd[];
+
+// F3D ucode
+extern u64 gspF3DEXTextStart[], gspF3DEXTextEnd[];
+
+extern u64 gspF3DLXTextStart[], gspF3DLXTextEnd[];
+
+// F3D ucode data
+extern u64 gspF3DEXDataStart[], gspF3DEXDataEnd[];
+
+extern u64 gspF3DLXDataStart[], gspF3DLXDataEnd[];
+
+// aspMain (audio) ucode
+extern u64 rspAspMainStart[], rspAspMainEnd[];
+
+// aspMain ucode data
+extern u64 rspAspMainDataStart[], rspAspMainDataEnd[];
+
+#endif
+
+#ifdef XBOX360_PORT
+/* Exact lengths from the existing US extraction manifest. */
+#define rspF3DBootEnd (rspF3DBootStart + 0xD0 / sizeof(u64))
+#define rspAspMainDataEnd (rspAspMainDataStart + 0x300 / sizeof(u64))
+#endif

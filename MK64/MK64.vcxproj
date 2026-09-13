@@ -1,0 +1,1176 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="4.0">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="CodeAnalysis|Xbox 360">
+      <Configuration>CodeAnalysis</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Xbox 360">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile|Xbox 360">
+      <Configuration>Profile</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile_FastCap|Xbox 360">
+      <Configuration>Profile_FastCap</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseDebug|Xbox 360">
+      <Configuration>ReleaseDebug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox 360">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release_LTCG|Xbox 360">
+      <Configuration>Release_LTCG</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{60FD2D53-DC7B-4912-9BEF-363BD3C0FC12}</ProjectGuid>
+    <Keyword>Xbox360Proj</Keyword>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDebug|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDebug|Xbox 360'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDebug|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+    <RemoteRoot>Hdd1:\Games\MK64</RemoteRoot>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <AdditionalDependencies>xapilibd.lib;d3d9d.lib;d3dx9d.lib;xgraphicsd.lib;xboxkrnl.lib;xnetd.lib;xaudiod2.lib;xactd3.lib;x3daudiod.lib;xmcored.lib;xbdm.lib;vcompd.lib</AdditionalDependencies>
+    </Link>
+    <Deploy>
+      <DeploymentType>CopyToHardDrive</DeploymentType>
+    </Deploy>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level4</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MinimalRebuild>true</MinimalRebuild>
+      <PREfast>AnalyzeOnly</PREfast>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <AdditionalDependencies>xapilibd.lib;d3d9d.lib;d3dx9d.lib;xgraphicsd.lib;xboxkrnl.lib;xnetd.lib;xaudiod2.lib;xactd3.lib;x3daudiod.lib;xmcored.lib;xbdm.lib;vcompd.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <IgnoreSpecificDefaultLibraries>xapilib.lib</IgnoreSpecificDefaultLibraries>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilibi.lib;d3d9i.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3i.lib;x3daudioi.lib;xmcorei.lib;xbdm.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <CallAttributedProfiling>Fastcap</CallAttributedProfiling>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3.lib;x3daudio.lib;xmcore.lib;vcomp.lib;xbdm.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3.lib;x3daudio.lib;xmcore.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDebug|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>Disabled</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3.lib;x3daudio.lib;xmcore.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+    <Deploy>
+      <DeploymentType>CopyToHardDrive</DeploymentType>
+    </Deploy>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>XBOX360_PORT=1;NON_MATCHING=1;AVOID_UB=1;F3DEX_GBI=1;F3D_OLD=1;VERSION_US=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)mk64-master;$(SolutionDir)mk64-master\include;$(SolutionDir)mk64-master\src;$(SolutionDir)mk64-master\src\racing;$(SolutionDir)mk64-master\src\ending;$(SolutionDir)mk64-master\src\audio;$(SolutionDir)mk64-master\src\data;$(SolutionDir)mk64-master\courses;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9ltcg.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3ltcg.lib;x3daudioltcg.lib;xmcoreltcg.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\courses\banshee_boardwalk\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_banshee_boardwalk_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\banshee_boardwalk\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_banshee_boardwalk_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\big_donut\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_big_donut_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\big_donut\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_big_donut_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\block_fort\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_block_fort_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\block_fort\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_block_fort_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\bowsers_castle\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_bowsers_castle_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\bowsers_castle\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_bowsers_castle_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\choco_mountain\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_choco_mountain_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\choco_mountain\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_choco_mountain_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\dks_jungle_parkway\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_dks_jungle_parkway_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\dks_jungle_parkway\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_dks_jungle_parkway_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\double_deck\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_double_deck_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\double_deck\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_double_deck_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\frappe_snowland\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_frappe_snowland_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\frappe_snowland\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_frappe_snowland_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\kalimari_desert\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_kalimari_desert_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\kalimari_desert\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_kalimari_desert_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\koopa_troopa_beach\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_koopa_troopa_beach_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\koopa_troopa_beach\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_koopa_troopa_beach_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\luigi_raceway\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_luigi_raceway_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\luigi_raceway\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_luigi_raceway_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\mario_raceway\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_mario_raceway_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\mario_raceway\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_mario_raceway_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\moo_moo_farm\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_moo_moo_farm_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\moo_moo_farm\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_moo_moo_farm_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\rainbow_road\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_rainbow_road_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\rainbow_road\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_rainbow_road_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\royal_raceway\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_royal_raceway_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\royal_raceway\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_royal_raceway_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\sherbet_land\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_sherbet_land_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\sherbet_land\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_sherbet_land_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\skyscraper\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_skyscraper_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\skyscraper\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_skyscraper_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\toads_turnpike\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_toads_turnpike_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\toads_turnpike\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_toads_turnpike_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\wario_stadium\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_wario_stadium_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\wario_stadium\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_wario_stadium_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\yoshi_valley\course_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_yoshi_valley_course_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\yoshi_valley\course_offsets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_yoshi_valley_course_offsets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\include\xbox360\gfx_cc.c">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_include_xbox360_gfx_cc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\include\xbox360\gfx_pc.c">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_include_xbox360_gfx_pc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\animation.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_animation.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\audio_session_presets.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_audio_session_presets.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\effects.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_effects.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\external.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_external.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\heap.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_heap.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\load.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_load.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\playback.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_playback.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\port_eu.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_port_eu.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\seqplayer.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_seqplayer.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\audio\synthesis.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_audio_synthesis.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\audio_heap.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_audio_heap.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\buffers.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_buffers.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\gfx_output_buffer.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_gfx_output_buffer.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\memory_pool.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_memory_pool.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\random.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_random.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\trig_tables.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_trig_tables.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\buffers\trig_tables_bss.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_buffers_trig_tables_bss.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\camera.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_camera.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_800029B0.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_800029B0.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_8003DC40.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_8003DC40.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_80057C60.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_80057C60.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_80057C60_var.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_80057C60_var.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_8006E9C0.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_8006E9C0.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_80086E70.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_80086E70.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_80091440.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_80091440.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\code_800AF9B0.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_code_800AF9B0.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\cpu_vehicles_camera_path.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_cpu_vehicles_camera_path.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\crash_screen.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_crash_screen.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\data\data_segment2.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_data_data_segment2.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\data\kart_attributes.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_data_kart_attributes.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\data\path_spawn_metadata.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_data_path_spawn_metadata.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\data\some_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_data_some_data.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\data\textures.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_data_textures.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\debug\crash_screen_enhancement.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_debug_crash_screen_enhancement.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\debug\debug.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_debug_debug.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\effects.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_effects.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\camera_junk.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_camera_junk.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\ceremony_and_credits.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_ceremony_and_credits.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\code_80280000.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_code_80280000.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\code_80281780.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_code_80281780.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\code_80281C40.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_code_80281C40.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\credits.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_credits.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\dl_unk_80284EE0.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_dl_unk_80284EE0.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\ending\podium_ceremony_actors.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_ending_podium_ceremony_actors.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\gbiMacro.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_gbiMacro.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\kart_dma.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_kart_dma.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\main.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_main.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\math_util_2.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_math_util_2.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\menu_items.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_menu_items.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\menus.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_menus.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\player_controller.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_player_controller.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\profiler.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_profiler.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\actors.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_actors.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\actors_extended.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_actors_extended.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\collision.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_collision.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\math_util.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_math_util.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\memory.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_memory.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\race_logic.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_race_logic.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\render_courses.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_render_courses.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\racing\skybox_and_splitscreen.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_racing_skybox_and_splitscreen.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\render_objects.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_render_objects.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\render_player.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_render_player.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\replays.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_replays.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\save.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_save.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\spawn_players.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_spawn_players.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\update_objects.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_update_objects.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_audio.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_audio_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_audio_hle.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_audio_hle_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_entry.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_entry_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_gfx_bridge.c">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_gfx_bridge.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_input.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_input_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_renderer.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_renderer_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_video.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_video_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_window_api.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_src_xbox360_xbox360_window_api_cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\assets\code\ceremony_data\ceremony_data.c">
+      <ObjectFileName>$(IntDir)mk64_mk64_master_assets_code_ceremony_data_ceremony_data.obj</ObjectFileName>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\assets\code\common_data\common_data.c">
+      <ObjectFileName>$(IntDir)mk64_mk64_master_assets_code_common_data_common_data.obj</ObjectFileName>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\assets\code\data_800E45C0\data_800E45C0.c">
+      <ObjectFileName>$(IntDir)mk64_mk64_master_assets_code_data_800E45C0_data_800E45C0.obj</ObjectFileName>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\assets\code\data_800E8700\data_800E8700.c">
+      <ObjectFileName>$(IntDir)mk64_mk64_master_assets_code_data_800E8700_data_800E8700.obj</ObjectFileName>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\assets\code\startup_logo\startup_logo.c">
+      <ObjectFileName>$(IntDir)mk64_mk64_master_assets_code_startup_logo_startup_logo.obj</ObjectFileName>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\banshee_boardwalk\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_banshee_boardwalk_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\banshee_boardwalk\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_banshee_boardwalk_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\banshee_boardwalk\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_banshee_boardwalk_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\big_donut\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_big_donut_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\big_donut\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_big_donut_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\big_donut\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_big_donut_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\block_fort\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_block_fort_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\block_fort\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_block_fort_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\block_fort\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_block_fort_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\bowsers_castle\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_bowsers_castle_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\bowsers_castle\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_bowsers_castle_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\bowsers_castle\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_bowsers_castle_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\choco_mountain\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_choco_mountain_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\choco_mountain\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_choco_mountain_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\choco_mountain\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_choco_mountain_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\dks_jungle_parkway\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_dks_jungle_parkway_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\dks_jungle_parkway\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_dks_jungle_parkway_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\dks_jungle_parkway\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_dks_jungle_parkway_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\double_deck\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_double_deck_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\double_deck\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_double_deck_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\double_deck\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_double_deck_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\frappe_snowland\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_frappe_snowland_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\frappe_snowland\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_frappe_snowland_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\frappe_snowland\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_frappe_snowland_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\kalimari_desert\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_kalimari_desert_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\kalimari_desert\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_kalimari_desert_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\kalimari_desert\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_kalimari_desert_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\koopa_troopa_beach\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_koopa_troopa_beach_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\koopa_troopa_beach\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_koopa_troopa_beach_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\koopa_troopa_beach\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_koopa_troopa_beach_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\luigi_raceway\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_luigi_raceway_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\luigi_raceway\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_luigi_raceway_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\luigi_raceway\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_luigi_raceway_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\mario_raceway\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_mario_raceway_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\mario_raceway\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_mario_raceway_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\mario_raceway\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_mario_raceway_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\moo_moo_farm\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_moo_moo_farm_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\moo_moo_farm\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_moo_moo_farm_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\moo_moo_farm\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_moo_moo_farm_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\rainbow_road\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_rainbow_road_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\rainbow_road\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_rainbow_road_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\rainbow_road\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_rainbow_road_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\royal_raceway\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_royal_raceway_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\royal_raceway\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_royal_raceway_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\royal_raceway\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_royal_raceway_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\sherbet_land\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_sherbet_land_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\sherbet_land\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_sherbet_land_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\sherbet_land\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_sherbet_land_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\skyscraper\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_skyscraper_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\skyscraper\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_skyscraper_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\skyscraper\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_skyscraper_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\toads_turnpike\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_toads_turnpike_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\toads_turnpike\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_toads_turnpike_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\toads_turnpike\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_toads_turnpike_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\wario_stadium\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_wario_stadium_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\wario_stadium\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_wario_stadium_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\wario_stadium\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_wario_stadium_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\yoshi_valley\course_vertices.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_yoshi_valley_course_vertices_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\yoshi_valley\course_displaylists.inc.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_yoshi_valley_course_displaylists_inc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\yoshi_valley\course_textures.linkonly.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mk64_mk64_master_courses_yoshi_valley_course_textures_linkonly.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+  <ItemGroup />
+  <ItemGroup Label="MK64LocalAssetBanks">
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\course_player_selection.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_course_player_selection.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\other_textures.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_other_textures.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\rsp.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_rsp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\texture_data_2.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_texture_data_2.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\texture_tkmk00.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_texture_tkmk00.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\bowser_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_bowser_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\donkeykong_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_donkeykong_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\luigi_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_luigi_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\mario_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_mario_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\peach_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_peach_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\toad_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_toad_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\wario_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_wario_kart.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\generated_banks\yoshi_kart.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)bank_yoshi_kart.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup Label="MK64PortableMath">
+    <ClCompile Include="..\mk64-master\src\os\guLookAtF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guLookAtF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guMtxCatL.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guMtxCatL.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guMtxCatF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guMtxCatF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guMtxF2L.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guMtxF2L.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guOrthoF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guOrthoF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guPerspectiveF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guPerspectiveF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guRotateF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guRotateF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guScaleF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guScaleF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guTranslateF.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guTranslateF.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\guNormalize.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)portable_guNormalize.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_memory_codec.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_memory_codec.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup Label="MK64RuntimeCodecs">
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_replay_codec.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)runtime_xbox360_replay_codec.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_tkmk00.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)runtime_xbox360_tkmk00.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\courses\staff_ghost_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)runtime_staff_ghost_data.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_os_core.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_os_core.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_save_input.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_save_input.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_diagnostics.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_diagnostics.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_asset_loader.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_asset_loader.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_course_table.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_course_table.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_os_devices.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_os_devices.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\mk64-master\src\os\osViTable.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)osViTable.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_netplay.cpp">
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_netplay.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+</Project>

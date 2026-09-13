@@ -1,0 +1,372 @@
+#ifndef MK64_NETPLAY_PROTOCOL_H
+#define MK64_NETPLAY_PROTOCOL_H
+#include <stdint.h>
+#include <string.h>
+
+/*
+ * MK64 Xbox 360 netplay protocol v2
+ *
+ * Topology:
+ *   P1 = host
+ *   P2/P3/P4 = one remote Xbox each
+ *
+ * Clients send only their own delayed input history to the host.
+ * The host relays authoritative all-player frame sets back to every client.
+ * Every machine runs the same deterministic simulation in lockstep.
+ *
+ * Wire encoding is explicit: never transmit native structures or pointers.
+ */
+namespace mknet {
+
+enum {
+    VERSION=2,
+    BUILD=0xB2200402,
+    HEADER=28,
+    HISTORY=256,
+    REDUNDANCY=24,
+    MAX_PLAYERS=4,
+    MAX_PACKET=512
+};
+
+enum Type {
+    HELLO=1,
+    OFFER,
+    READY,
+    START,
+    START_ACK,
+    CLIENT_INPUT,
+    FRAMESET,
+    GOODBYE,
+    BOOT_READY,
+    BOOT_GO
+};
+
+struct Pad {
+    uint16_t buttons;
+    int8_t x,y;
+};
+
+inline uint32_t get32(const uint8_t *p) {
+    return uint32_t(p[0])<<24|uint32_t(p[1])<<16|uint32_t(p[2])<<8|p[3];
+}
+inline void put32(uint8_t *p,uint32_t v) {
+    p[0]=uint8_t(v>>24);p[1]=uint8_t(v>>16);p[2]=uint8_t(v>>8);p[3]=uint8_t(v);
+}
+inline bool equal(Pad a,Pad b) {
+    return a.buttons==b.buttons&&a.x==b.x&&a.y==b.y;
+}
+inline void encode_pad(uint8_t *p,Pad a) {
+    p[0]=uint8_t(a.buttons>>8);p[1]=uint8_t(a.buttons);p[2]=uint8_t(a.x);p[3]=uint8_t(a.y);
+}
+inline Pad decode_pad(const uint8_t *p) {
+    Pad a={uint16_t(uint16_t(p[0])<<8|p[1]),int8_t(p[2]),int8_t(p[3])};return a;
+}
+
+inline int header(uint8_t *p,Type t,const uint8_t session[16],int payload) {
+    memset(p,0,HEADER);
+    memcpy(p,"MK4P",4);
+    p[4]=VERSION;
+    p[5]=uint8_t(t);
+    p[6]=uint8_t((HEADER+payload)>>8);
+    p[7]=uint8_t(HEADER+payload);
+    put32(p+8,BUILD);
+    memcpy(p+12,session,16);
+    return HEADER+payload;
+}
+
+inline bool valid(const uint8_t *p,int n) {
+    if(n<(int)HEADER||n>(int)MAX_PACKET||memcmp(p,"MK4P",4)||p[4]!=VERSION||get32(p+8)!=(uint32_t)BUILD)return false;
+    if((int(p[6])*256+p[7])!=n)return false;
+    int payload=n-HEADER;
+    const uint8_t *q=p+HEADER;
+    switch(p[5]) {
+    case HELLO:
+    case GOODBYE:
+    case BOOT_READY:
+    case BOOT_GO:
+        return payload==0;
+    case OFFER:
+    case READY:
+        return payload==24 && q[20]>=1 && q[20]<MAX_PLAYERS;
+    case START:
+        return payload==4 && q[0]>=2 && q[0]<=8 &&
+               q[1]>=2 && q[1]<=MAX_PLAYERS &&
+               q[2]>=1 && q[2]<q[1];
+    case START_ACK:
+        return payload==1 && q[0]>=1 && q[0]<MAX_PLAYERS;
+    case CLIENT_INPUT: {
+        if(payload<20)return false;
+        unsigned slot=q[0],count=q[1];
+        return slot>=1&&slot<MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
+               payload==16+4*int(count);
+    }
+    case FRAMESET: {
+        if(payload<24)return false;
+        unsigned players=q[0],count=q[1];
+        return players>=2&&players<=MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
+               payload==16+4*int(players)*int(count);
+    }
+    default:
+        return false;
+    }
+}
+
+/* No input frame may advance until every game thread reaches its first read. */
+struct BootBarrier {
+    unsigned players,mask;
+    bool complete;
+    void reset(unsigned p){players=p;mask=1;complete=false;}
+    bool ready(unsigned slot){
+        if(players<2||players>MAX_PLAYERS||slot==0||slot>=players)return false;
+        mask|=1U<<slot;return true;
+    }
+    bool all_ready() const{return players>=2&&players<=MAX_PLAYERS&&mask==((1U<<players)-1);}
+};
+
+struct InputSlot {
+    uint32_t frame;
+    Pad pad;
+    bool present;
+};
+
+struct HashSlot {
+    uint32_t frame,value;
+    bool present;
+};
+
+struct Stream4 {
+    InputSlot inputs[MAX_PLAYERS][HISTORY];
+    HashSlot hashes[HISTORY];
+    HashSlot peer_hashes[MAX_PLAYERS][HISTORY];
+    uint32_t frame,latest_local,latest_complete;
+    unsigned delay,players,local_slot;
+    bool fault;
+
+    void reset(unsigned d,unsigned p,unsigned slot) {
+        memset(this,0,sizeof(*this));
+        if(d<2||d>8||p<2||p>MAX_PLAYERS||slot>=p){fault=true;return;}
+        delay=d;
+        players=p;
+        local_slot=slot;
+        Pad zero={0,0,0};
+        for(unsigned f=0;f<d;++f) {
+            for(unsigned s=0;s<p;++s) {
+                InputSlot &in=inputs[s][f%HISTORY];
+                in.present=true;
+                in.frame=f;
+                in.pad=zero;
+            }
+        }
+        latest_local=d-1;
+        latest_complete=d-1;
+    }
+
+    bool local_hash_matches(unsigned peer_slot,uint32_t f) {
+        if(peer_slot>=MAX_PLAYERS)return false;
+        const HashSlot &a=hashes[f%HISTORY];
+        const HashSlot &b=peer_hashes[peer_slot][f%HISTORY];
+        return !a.present||!b.present||a.frame!=f||b.frame!=f||a.value==b.value;
+    }
+
+    void check_all_hashes(uint32_t f) {
+        for(unsigned s=0;s<players;++s) {
+            if(s==local_slot)continue;
+            if(!local_hash_matches(s,f))fault=true;
+        }
+    }
+
+    void sample_local(Pad p,uint32_t state) {
+        if(fault||local_slot>=players)return;
+        uint32_t f=frame+delay;
+        InputSlot &s=inputs[local_slot][f%HISTORY];
+        if(s.present&&s.frame==f&&!equal(s.pad,p)){fault=true;return;}
+        s.present=true;s.frame=f;s.pad=p;
+        latest_local=f;
+
+        HashSlot &h=hashes[frame%HISTORY];
+        h.frame=frame;h.value=state;h.present=true;
+        check_all_hashes(frame);
+
+        if(local_slot==0)update_complete();
+    }
+
+    bool all_present(uint32_t f) const {
+        for(unsigned s=0;s<players;++s) {
+            const InputSlot &in=inputs[s][f%HISTORY];
+            if(!in.present||in.frame!=f)return false;
+        }
+        return true;
+    }
+
+    void update_complete() {
+        if(local_slot!=0)return;
+        while(latest_complete<0x7FFFFEFEU) {
+            uint32_t next=latest_complete+1;
+            if(!all_present(next))break;
+            latest_complete=next;
+        }
+    }
+
+    int client_packet(uint8_t *p,const uint8_t session[16]) {
+        uint32_t first=latest_local>=REDUNDANCY-1?latest_local-(REDUNDANCY-1):0;
+        unsigned count=latest_local-first+1;
+        int n=header(p,CLIENT_INPUT,session,16+count*4);
+        uint8_t *q=p+HEADER;
+        q[0]=uint8_t(local_slot);
+        q[1]=uint8_t(count);
+        const HashSlot &h=hashes[frame%HISTORY];
+        q[2]=uint8_t((h.present&&h.frame==frame)?1:0);
+        q[3]=0;
+        put32(q+4,first);
+        put32(q+8,frame);
+        put32(q+12,q[2]?h.value:0);
+        for(unsigned i=0;i<count;++i) {
+            const InputSlot &in=inputs[local_slot][(first+i)%HISTORY];
+            encode_pad(q+16+i*4,in.pad);
+        }
+        return n;
+    }
+
+    bool receive_client(unsigned expected_slot,const uint8_t *p,int n) {
+        if(fault||local_slot!=0||expected_slot==0||expected_slot>=players)return false;
+        if(!valid(p,n)||p[5]!=CLIENT_INPUT)return false;
+        const uint8_t *q=p+HEADER;
+        if(q[0]!=expected_slot)return false;
+
+        unsigned count=q[1];
+        uint32_t first=get32(q+4),hf=get32(q+8);
+        if(first>0x7FFFFF00U||hf>frame+delay+REDUNDANCY)return false;
+
+        for(unsigned i=0;i<count;++i) {
+            uint32_t f=first+i;
+            if(f+HISTORY<=frame||f>frame+delay+REDUNDANCY)continue;
+            InputSlot &s=inputs[expected_slot][f%HISTORY];
+            Pad a=decode_pad(q+16+i*4);
+            if(s.present&&s.frame==f&&!equal(s.pad,a)){fault=true;return false;}
+            s.present=true;s.frame=f;s.pad=a;
+        }
+
+        if(q[2]&&hf+HISTORY>frame) {
+            HashSlot &h=peer_hashes[expected_slot][hf%HISTORY];
+            h.frame=hf;h.value=get32(q+12);h.present=true;
+            if(!local_hash_matches(expected_slot,hf))fault=true;
+        }
+
+        update_complete();
+        return !fault;
+    }
+
+    int frameset_packet(uint8_t *p,const uint8_t session[16]) {
+        update_complete();
+        uint32_t first=latest_complete>=REDUNDANCY-1?latest_complete-(REDUNDANCY-1):0;
+        unsigned count=latest_complete-first+1;
+        int n=header(p,FRAMESET,session,16+count*players*4);
+        uint8_t *q=p+HEADER;
+        q[0]=uint8_t(players);
+        q[1]=uint8_t(count);
+        const HashSlot &h=hashes[frame%HISTORY];
+        q[2]=uint8_t((h.present&&h.frame==frame)?1:0);
+        q[3]=0;
+        put32(q+4,first);
+        put32(q+8,frame);
+        put32(q+12,q[2]?h.value:0);
+
+        uint8_t *out=q+16;
+        for(unsigned i=0;i<count;++i) {
+            uint32_t f=first+i;
+            for(unsigned s=0;s<players;++s) {
+                encode_pad(out,inputs[s][f%HISTORY].pad);
+                out+=4;
+            }
+        }
+        return n;
+    }
+
+    bool receive_frameset(const uint8_t *p,int n) {
+        if(fault||local_slot==0)return false;
+        if(!valid(p,n)||p[5]!=FRAMESET)return false;
+        const uint8_t *q=p+HEADER;
+        if(q[0]!=players)return false;
+
+        unsigned count=q[1];
+        uint32_t first=get32(q+4),hf=get32(q+8);
+        if(first>0x7FFFFF00U||hf>frame+delay+REDUNDANCY)return false;
+
+        const uint8_t *in=q+16;
+        for(unsigned i=0;i<count;++i) {
+            uint32_t f=first+i;
+            for(unsigned s=0;s<players;++s) {
+                Pad a=decode_pad(in);in+=4;
+                if(f+HISTORY<=frame||f>frame+delay+REDUNDANCY)continue;
+                InputSlot &dst=inputs[s][f%HISTORY];
+                if(dst.present&&dst.frame==f&&!equal(dst.pad,a)){fault=true;return false;}
+                dst.present=true;dst.frame=f;dst.pad=a;
+            }
+        }
+
+        if(q[2]&&hf+HISTORY>frame) {
+            HashSlot &h=peer_hashes[0][hf%HISTORY];
+            h.frame=hf;h.value=get32(q+12);h.present=true;
+            if(!local_hash_matches(0,hf))fault=true;
+        }
+        return !fault;
+    }
+
+    bool consume(Pad out[MAX_PLAYERS]) {
+        if(fault||frame>=0x7FFFFF00U)return false;
+        for(unsigned s=0;s<players;++s) {
+            InputSlot &in=inputs[s][frame%HISTORY];
+            if(!in.present||in.frame!=frame)return false;
+        }
+        for(unsigned s=0;s<players;++s)out[s]=inputs[s][frame%HISTORY].pad;
+        ++frame;
+        return true;
+    }
+};
+
+inline bool parse_endpoint(const char *s,uint32_t &ip,uint16_t &port) {
+    ip=0;port=6464;
+    for(int i=0;i<4;++i) {
+        unsigned v=0,d=0;
+        while(*s>='0'&&*s<='9') {
+            v=v*10+(*s++-'0');
+            if(++d>3||v>255)return false;
+        }
+        if(!d)return false;
+        ip=(ip<<8)|v;
+        if(i<3&&*s++!='.')return false;
+    }
+    if(*s==':') {
+        unsigned v=0,d=0;++s;
+        while(*s>='0'&&*s<='9') {
+            v=v*10+(*s++-'0');
+            if(++d>5||v>65535)return false;
+        }
+        if(!d||!v)return false;
+        port=uint16_t(v);
+    }
+    return !*s && (ip>>24)>0 && (ip>>24)<224 && ip!=0xFFFFFFFFU;
+}
+
+/* RFC 8489 IPv4 XOR-MAPPED-ADDRESS; match response transaction and exact length. */
+inline bool stun_address(const uint8_t *p,int n,const uint8_t tx[12],uint32_t &ip,uint16_t &port) {
+    if(n<20||p[0]!=1||p[1]!=1||get32(p+4)!=0x2112A442U||memcmp(p+8,tx,12))return false;
+    unsigned size=unsigned(p[2])*256+p[3];
+    if(size%4||size+20!=unsigned(n))return false;
+    for(unsigned off=20;off+4<=unsigned(n);) {
+        unsigned type=unsigned(p[off])*256+p[off+1];
+        unsigned len=unsigned(p[off+2])*256+p[off+3];
+        off+=4;
+        if(len>unsigned(n)-off)return false;
+        if(type==0x20&&len==8&&p[off+1]==1) {
+            port=uint16_t((unsigned(p[off+2])*256+p[off+3])^0x2112);
+            ip=get32(p+off+4)^0x2112A442U;
+            return port!=0;
+        }
+        off+=(len+3)&~3U;
+    }
+    return false;
+}
+
+} /* namespace mknet */
+#endif

@@ -1,0 +1,11 @@
+MK64 XBOX360 PORT SOURCE AUDIT
+
+Original archive files: 967
+Makefile: TARGET_N64 defaults to 1; TARGET_N64=0 forces NON_MATCHING=1.
+Default graphics microcode: Fast3DEX 0.95 via F3DEX_GBI=1 F3D_OLD=1.
+main.c controller seam: osContStartReadData/osRecvMesg/osContGetReadData.
+main.c graphics seam: exec_display_list(SPTask*).
+main.c VI seam: display_and_vsync -> osViSwapBuffer + two vblank waits.
+audio seam caveat: synthesis_execute builds RSP ABI commands; XAudio output alone is insufficient.
+
+Files added under src/xbox360 and include/xbox360.
