@@ -72,9 +72,10 @@ static ShaderProgram *create_shader(uint32_t id) {
     }
     D3DVERTEXELEMENT9 e[9];unsigned n=0;UINT offset=0;
     add_element(e,n,offset,D3DDECLTYPE_FLOAT4,D3DDECLUSAGE_POSITION,0,16);
-    if(f.used_textures[0]||f.used_textures[1])add_element(e,n,offset,D3DDECLTYPE_FLOAT2,D3DDECLUSAGE_TEXCOORD,0,8);
-    if(f.opt_fog)add_element(e,n,offset,D3DDECLTYPE_FLOAT4,D3DDECLUSAGE_TEXCOORD,1,16);
-    for(int i=0;i<f.num_inputs;i++)add_element(e,n,offset,f.opt_alpha?D3DDECLTYPE_FLOAT4:D3DDECLTYPE_FLOAT3,D3DDECLUSAGE_TEXCOORD,(BYTE)(i+2),f.opt_alpha?16:12);
+    if(f.used_textures[0])add_element(e,n,offset,D3DDECLTYPE_FLOAT2,D3DDECLUSAGE_TEXCOORD,0,8);
+    if(f.used_textures[1])add_element(e,n,offset,D3DDECLTYPE_FLOAT2,D3DDECLUSAGE_TEXCOORD,1,8);
+    if(f.opt_fog)add_element(e,n,offset,D3DDECLTYPE_FLOAT4,D3DDECLUSAGE_TEXCOORD,2,16);
+    for(int i=0;i<f.num_inputs;i++)add_element(e,n,offset,D3DDECLTYPE_FLOAT4,D3DDECLUSAGE_TEXCOORD,(BYTE)(i+3),16);
     const D3DVERTEXELEMENT9 end=D3DDECL_END();e[n]=end;p->stride=offset;
     if(d && FAILED(d->CreateVertexDeclaration(e,&p->decl)))x360_log("MK64: vertex declaration failed\n");
     shaders.push_back(p);load_shader(p);return p;
@@ -172,6 +173,19 @@ static void draw(float*buf,size_t len,size_t tris){
         }
         return;
     }
+    mkview::Rect crop,visible;
+    mkview::Rect vp={active_viewport.x,active_viewport.y,active_viewport.width,active_viewport.height};
+    mkview::Rect sc={active_scissor.x,active_scissor.y,active_scissor.width,active_scissor.height};
+    const int online_players=x360_net_player_count();
+    const int local_slot=x360_net_local_slot();
+    const bool local=x360_net_active() && gGamestate==4 &&
+        online_players>=2 && online_players<=4 &&
+        gPlayerCountSelection1==online_players &&
+        mkview::crop(gActiveScreenMode,online_players,local_slot,crop);
+
+    if(local && (!mkview::intersect(sc,vp,visible)||!mkview::intersect(visible,crop,visible)))return;
+    /* Diagnostic scans are unnecessary once their bounded samples are logged. */
+    if(x360_logging_enabled() && (coordinate_range_log_count<6 || abnormal_primitive_log_count<8)) {
     float clip_min[4]={1.0e30f,1.0e30f,1.0e30f,1.0e30f};
     float clip_max[4]={-1.0e30f,-1.0e30f,-1.0e30f,-1.0e30f};
     float ndc_min[3]={1.0e30f,1.0e30f,1.0e30f};
@@ -209,27 +223,20 @@ static void draw(float*buf,size_t len,size_t tris){
               a[0],a[1],a[2],a[3],b[0],b[1],b[2],b[3],c[0],c[1],c[2],c[3]);
             message[sizeof(message)-1]=0;x360_log(message);++abnormal_primitive_log_count;}
     }
+    }
     /* A flush can be caused by the state change which selects the next shader.
      * Rebind the program captured when this batch was packed. */
     ShaderProgram *selected_program=current;
     load_shader(batch);
-    if(!batch->vs||!batch->ps||!batch->decl)return;
+    if(!batch->vs||!batch->ps||!batch->decl){if(selected_program!=batch)load_shader(selected_program);return;}
 
     /* MK64 PER-CONSOLE FULLSCREEN VIEW
      * MK64 still renders native 2P/3P/4P split-screen internally.
      * Online racing presentation keeps only this console's assigned slot and
      * expands that viewport to the full 1280x720 Xbox output.
      */
-    mkview::Rect crop,visible;
-    mkview::Rect vp={active_viewport.x,active_viewport.y,active_viewport.width,active_viewport.height};
-    mkview::Rect sc={active_scissor.x,active_scissor.y,active_scissor.width,active_scissor.height};
-    const int online_players=x360_net_player_count();
-    const int local_slot=x360_net_local_slot();
-    const bool local=x360_net_active() && gGamestate==4 &&
-        online_players>=2 && online_players<=4 &&
-        gPlayerCountSelection1==online_players &&
-        mkview::crop(gActiveScreenMode,online_players,local_slot,crop);
-
+    const bool x360_legacy_wide = x360_display_aspect() > 1.5f;
+    const mkview::Rect out = mkview::output(x360_legacy_wide);
     if(local){
         if(!local_view_logged){
             char message[192];
@@ -241,104 +248,66 @@ static void draw(float*buf,size_t len,size_t tris){
         if(!mkview::intersect(sc,vp,visible)||!mkview::intersect(visible,crop,visible)){
             if(selected_program!=batch)load_shader(selected_program);return;
         }
-        D3DVIEWPORT9 full={0,0,1280,720,0,1};d->SetViewport(&full);
-        RECT clip={(visible.x-crop.x)*1280/crop.w,(visible.y-crop.y)*720/crop.h,
-            (visible.x+visible.w-crop.x)*1280/crop.w,(visible.y+visible.h-crop.y)*720/crop.h};
-        d->SetScissorRect(&clip);
+        if (x360_legacy_wide) {
+            /* Exact known-good B23/B23F 16:9 local fullscreen presentation. */
+            D3DVIEWPORT9 full={0,0,1280,720,0,1};
+            d->SetViewport(&full);
+            RECT clip={
+                (visible.x-crop.x)*1280/crop.w,
+                (visible.y-crop.y)*720/crop.h,
+                (visible.x+visible.w-crop.x)*1280/crop.w,
+                (visible.y+visible.h-crop.y)*720/crop.h
+            };
+            d->SetScissorRect(&clip);
+        } else {
+            /* 4:3 only: map the selected local view into the pillarbox area. */
+            D3DVIEWPORT9 full={
+                (DWORD)out.x,(DWORD)out.y,(DWORD)out.w,(DWORD)out.h,0,1
+            };
+            d->SetViewport(&full);
+            RECT clip={
+                out.x+(visible.x-crop.x)*out.w/crop.w,
+                out.y+(visible.y-crop.y)*out.h/crop.h,
+                out.x+(visible.x+visible.w-crop.x)*out.w/crop.w,
+                out.y+(visible.y+visible.h-crop.y)*out.h/crop.h
+            };
+            d->SetScissorRect(&clip);
+        }
         local_view_vertices.assign(buf,buf+len);
         for(size_t v=0;v<vertices;++v)
             mkview::vertex(&local_view_vertices[v*x360_gfx_batch_layout.floats_per_vertex],vp,crop);
 
-        /* MK64 SKYBOX + GENERIC SPLIT ASPECT FIX
-         *
-         * The fullscreen path maps the selected native split viewport onto the full 1280x720
-         * output.  If that mapping is anisotropic (2P horizontal or 2P
-         * vertical), geometry must be corrected so a source pixel has the same
-         * scale on X and Y.  3P/4P is 640x360 -> 1280x720, exactly 2x on both
-         * axes, therefore the correction factors below become 1.0 naturally.
-         *
-         * WORLD / SKY / LARGE PRESENTATION GEOMETRY:
-         * Expand the axis which was scaled less by the fullscreen mapping.  This is equivalent to
-         * a uniform fill/crop and preserves the normal split-screen proportions.
-         * In particular, MK64's skybox is untextured orthographic geometry with
-         * G_ZBUFFER deliberately disabled, so !use_texture is an important sky
-         * discriminator.  Treating it as a small HUD quad would compress the two sky gradient
-         * quads independently, leaving black horizontal gaps.
-         *
-         * SMALL TEXTURED HUD/SPRITE QUADS:
-         * Keep their mapped screen positions, but undo the fullscreen mapping's extra scale on
-         * the over-scaled axis around each quad's own center.  This keeps timer,
-         * lap, rank, item and character HUD elements from becoming stretched.
-         */
-        {
-            const size_t fpv=x360_gfx_batch_layout.floats_per_vertex;
-            const float map_sx=1280.0f/(float)crop.w;
-            const float map_sy=720.0f/(float)crop.h;
-            const float world_x=(map_sy>map_sx)?(map_sy/map_sx):1.0f;
-            const float world_y=(map_sx>map_sy)?(map_sx/map_sy):1.0f;
-            const float hud_x=(map_sx>map_sy)?(map_sy/map_sx):1.0f;
-            const float hud_y=(map_sy>map_sx)?(map_sx/map_sy):1.0f;
-            const bool needs_aspect=(fabsf(world_x-1.0f)>0.001f)||(fabsf(world_y-1.0f)>0.001f);
-
-            if(needs_aspect){
-                float minx=1.0e30f,maxx=-1.0e30f,miny=1.0e30f,maxy=-1.0e30f;
-                for(size_t v=0;v<vertices;++v){
-                    float *p=&local_view_vertices[v*fpv];
-                    if(fabsf(p[3])<1.0e-8f)continue;
-                    const float nx=p[0]/p[3],ny=p[1]/p[3];
-                    if(nx<minx)minx=nx;if(nx>maxx)maxx=nx;
-                    if(ny<miny)miny=ny;if(ny>maxy)maxy=ny;
-                }
-                const float spanx=maxx-minx,spany=maxy-miny;
-                const bool depth_world=(x360_gfx_batch_layout.geometry_mode&G_ZBUFFER)!=0;
-                const bool untextured_world_or_sky=x360_gfx_batch_layout.use_texture==0;
-                const bool large_presentation=spanx>1.25f||spany>1.25f;
-
-                if(depth_world||untextured_world_or_sky||large_presentation){
-                    for(size_t v=0;v<vertices;++v){
-                        float *p=&local_view_vertices[v*fpv];
-                        p[0]*=world_x;
-                        p[1]*=world_y;
-                    }
-                }else{
-                    for(size_t base=0;base<vertices;base+=6){
-                        const size_t count=(base+6<=vertices)?6:(vertices-base);
-                        float gy0=1.0e30f,gy1=-1.0e30f,gx0=1.0e30f,gx1=-1.0e30f;
-                        for(size_t i=0;i<count;++i){
-                            float *p=&local_view_vertices[(base+i)*fpv];
-                            if(fabsf(p[3])<1.0e-8f)continue;
-                            const float nx=p[0]/p[3],ny=p[1]/p[3];
-                            if(nx<gx0)gx0=nx;if(nx>gx1)gx1=nx;
-                            if(ny<gy0)gy0=ny;if(ny>gy1)gy1=ny;
-                        }
-                        const float qspanx=gx1-gx0,qspany=gy1-gy0;
-                        const bool presentation_quad=qspanx>1.25f||qspany>1.25f;
-                        if(presentation_quad){
-                            for(size_t i=0;i<count;++i){
-                                float *p=&local_view_vertices[(base+i)*fpv];
-                                p[0]*=world_x;
-                                p[1]*=world_y;
-                            }
-                            continue;
-                        }
-
-                        const float cx=(gx0+gx1)*0.5f;
-                        const float cy=(gy0+gy1)*0.5f;
-                        for(size_t i=0;i<count;++i){
-                            float *p=&local_view_vertices[(base+i)*fpv];
-                            if(fabsf(p[3])<1.0e-8f)continue;
-                            const float nx=p[0]/p[3],ny=p[1]/p[3];
-                            p[0]=(cx+(nx-cx)*hud_x)*p[3];
-                            p[1]=(cy+(ny-cy)*hud_y)*p[3];
-                        }
-                    }
-                }
-            }
-        }
+        /* Projection and rectangle sizing are corrected before clipping.
+         * Never infer quads from six consecutive, potentially clipped vertices. */
         d->DrawPrimitiveUP(D3DPT_TRIANGLELIST,(UINT)tris,&local_view_vertices[0],packed_stride);
     }else{
-        D3DVIEWPORT9 original={(DWORD)vp.x,(DWORD)vp.y,(DWORD)vp.w,(DWORD)vp.h,0,1};d->SetViewport(&original);
-        RECT clip={sc.x,sc.y,sc.x+sc.w,sc.y+sc.h};d->SetScissorRect(&clip);
+        if (x360_legacy_wide) {
+            /*
+             * Exact legacy 16:9 path from before the display-mode option:
+             * no output_rect(), no second presentation transform.
+             */
+            D3DVIEWPORT9 original={
+                (DWORD)vp.x,(DWORD)vp.y,(DWORD)vp.w,(DWORD)vp.h,0,1
+            };
+            d->SetViewport(&original);
+            RECT clip={sc.x,sc.y,sc.x+sc.w,sc.y+sc.h};
+            d->SetScissorRect(&clip);
+        } else {
+            /* New 4:3 mode only. */
+            mkview::Rect mapped_vp=mkview::output_rect(vp,out);
+            mkview::Rect mapped_sc=mkview::output_rect(sc,out);
+            D3DVIEWPORT9 original={
+                (DWORD)mapped_vp.x,(DWORD)mapped_vp.y,
+                (DWORD)mapped_vp.w,(DWORD)mapped_vp.h,0,1
+            };
+            d->SetViewport(&original);
+            RECT clip={
+                mapped_sc.x,mapped_sc.y,
+                mapped_sc.x+mapped_sc.w,mapped_sc.y+mapped_sc.h
+            };
+            d->SetScissorRect(&clip);
+        }
+
         d->DrawPrimitiveUP(D3DPT_TRIANGLELIST,(UINT)tris,buf,packed_stride);
         if(!x360_net_active())local_view_logged=false;
     }
@@ -351,7 +320,7 @@ static void init(void){
     d->SetRenderState(D3DRS_SCISSORTESTENABLE,TRUE);
 }
 static void resize(void){}
-static void start_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){d->Clear(0,0,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff000000,1,0);d->BeginScene();}}
+static void start_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){D3DVIEWPORT9 full={0,0,1280,720,0,1};d->SetViewport(&full);RECT all={0,0,1280,720};d->SetScissorRect(&all);d->Clear(0,0,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff000000,1,0);d->BeginScene();}}
 static void end_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d)d->EndScene();}
 static void finish(void){}
 extern "C" struct GfxRenderingAPI gfx_xbox360_api={z01,unload_shader,load_shader,create_shader,lookup_shader,shader_info,new_tex,select_tex,upload_tex,sampler,depth_test,depth_mask,zmode,viewport,scissor,use_alpha,draw,init,resize,start_frame,end_frame,finish};

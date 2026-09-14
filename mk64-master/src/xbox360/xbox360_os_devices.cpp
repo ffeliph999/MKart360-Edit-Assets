@@ -37,7 +37,7 @@ extern "C" void osViBlack(u8 black) {InterlockedExchange(&videoBlack,black?1:0);
 extern "C" int x360_video_is_black(void) {return InterlockedCompareExchange(&videoBlack,0,0)!=0;}
 extern "C" void osViSwapBuffer(void *buffer) {currentFramebuffer=buffer;/* D3D presents the native render target. */}
 extern "C" u32 osAiGetLength(void) {return (u32)x360_audio_buffered_samples()*4;}
-extern "C" s32 osAiSetFrequency(u32 rate) {return rate?32000:-1;/* Matches the native source voice rate. */}
+extern "C" s32 osAiSetFrequency(u32 rate) {return x360_audio_set_frequency(rate);}
 extern "C" s32 osAiSetNextBuffer(void *buffer,u32 bytes) {return x360_audio_submit_checked(buffer,bytes)?0:-1;}
 extern "C" void osSpTaskLoad(OSTask*) {/* Synchronous HLE uses the supplied task directly; no microcode DMA. */}
 extern "C" void osSpTaskStartGo(OSTask *task) {

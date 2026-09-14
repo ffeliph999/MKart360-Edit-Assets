@@ -5,6 +5,9 @@
 #include "audio/synthesis.h"
 #include "audio/seqplayer.h"
 #include "audio/port_eu.h"
+#ifdef XBOX360_PORT
+#include "xbox360/platform.h"
+#endif
 #include "audio/load.h"
 #include "audio/heap.h"
 #include "audio/data.h"
@@ -109,6 +112,13 @@ struct SPTask* create_next_audio_frame_task(void) {
     gAudioCmd = gAudioCmdBuffers[gAudioTaskIndex];
     index = gCurrAiBufferIndex;
     currAiBuffer = gAiBuffers[index];
+#ifdef XBOX360_PORT
+    /* XAudio queues several buffers. The original AI feedback target (64
+     * samples) drained that safety margin and caused recurring underruns. */
+    gAiBufferLengths[index] = x360_audio_generation_size(
+        gAudioBufferParameters.samplesPerFrameTarget, samplesRemainingInAI,
+        gAudioBufferParameters.minAiBufferLength, gAudioBufferParameters.maxAiBufferLength);
+#else
     gAiBufferLengths[index] =
         ((gAudioBufferParameters.samplesPerFrameTarget - samplesRemainingInAI + EXTRA_BUFFERED_AI_SAMPLES_TARGET) &
          ~0xF) +
@@ -119,6 +129,7 @@ struct SPTask* create_next_audio_frame_task(void) {
     if (gAiBufferLengths[index] > gAudioBufferParameters.maxAiBufferLength) {
         gAiBufferLengths[index] = gAudioBufferParameters.maxAiBufferLength;
     }
+#endif
     if (osRecvMesg(D_800EA3AC, &sp54, 0) != -1) {
         func_800CBCB0((u32) sp54);
     }

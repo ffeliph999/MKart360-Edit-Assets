@@ -3,27 +3,41 @@
 #include <d3d9.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include "xbox360/netplay.h"
 #include "xbox360/netplay_protocol.h"
 extern "C" IDirect3DDevice9 *x360_d3d_device(void);
 extern "C" void x360_log(const char *);
+extern "C" HRESULT x360_party_publish_host(unsigned int publicIp,unsigned short port,unsigned int token);
+extern "C" void x360_party_clear_host(void);
+extern "C" int x360_party_is_active(void);
+extern "C" DWORD x360_party_open_social_ui(void);
+extern "C" int x360_party_find_host(unsigned int *publicIp,unsigned short *port,unsigned int *token,char *gamerTag,unsigned int gamerTagSize);
+extern "C" int x360_party_logging_enabled(void);
+extern "C" void x360_party_set_logging(int enabled);
 /* UI uses target clears, so it needs no external font file or shader state. */
 #include "xbox360_netfont.h"
-static void screen(const char *title,const char *a,const char *b,const char *c,const char *d) {
+static bool display_wide=true;
+extern "C" int x360_display_widescreen(void){return display_wide?1:0;}
+extern "C" float x360_display_aspect(void){return display_wide?16.0f/9.0f:4.0f/3.0f;}
+static void screen(const char *title,const char *a,const char *b,const char *c,const char *d,const char *footer="B BACK    LOGGING IN OPTIONS",const char *detail=0) {
     IDirect3DDevice9 *dev=x360_d3d_device();if(!dev)return;
+    D3DVIEWPORT9 full={0,0,1280,720,0,1};dev->SetViewport(&full);
+    RECT all={0,0,1280,720};dev->SetScissorRect(&all);
     dev->Clear(0,0,D3DCLEAR_TARGET,0xFF102030,1,0);
     net_text(dev,72,64,title,5,0xFFFFD050);net_text(dev,72,170,a,3,0xFFFFFFFF);
     net_text(dev,72,240,b,3,0xFFFFFFFF);net_text(dev,72,330,c,3,0xFF90D0FF);
     net_text(dev,72,410,d,3,0xFF90D0FF);
-    net_text(dev,72,580,"B BACK    Y TOGGLE LOGGING",3,0xFFAAAAAA);
-    net_text(dev,72,630,x360_logging_enabled()?"LOGGING ON":"LOGGING OFF",3,0xFFAAAAAA);
+    net_text(dev,72,580,footer,3,0xFFAAAAAA);
+    net_text(dev,72,630,detail?detail:"LOGGING CONTROLS: OPTIONS",3,0xFFAAAAAA);
     dev->Present(0,0,0,0);
 }
 static WORD prev_buttons;
-static WORD pressed() {
+static WORD pressed(bool loggingHotkey=true) {
     XINPUT_STATE s;memset(&s,0,sizeof(s));XInputGetState(0,&s);
     WORD p=s.Gamepad.wButtons&~prev_buttons;prev_buttons=s.Gamepad.wButtons;
-    if(p&XINPUT_GAMEPAD_Y)x360_set_logging(!x360_logging_enabled());return p;
+    (void)loggingHotkey;
+    return p;
 }
 
 /* B19.4R explicit xboxkrnl XEX resolver declarations */
@@ -354,6 +368,7 @@ static int mk64_net_wsaerror(void) {
 #define WSAGetLastError()               mk64_net_wsaerror()
 
 /* B22N1 2-4 PLAYER HOST-RELAY NETPLAY */
+/* MK64_V3_2P_4P_EARLY_RELAY_LOW_LATENCY */
 static SOCKET sock=INVALID_SOCKET;
 static bool initialized,hosting,active,start_sent,failed;
 static mknet::BootBarrier boot;
@@ -376,6 +391,7 @@ struct PeerState {
     unsigned slot;
     DWORD last_received,last_offer;
     unsigned best_rtt;
+    mknet::Latency latency;
 };
 static PeerState peers[mknet::MAX_PLAYERS-1];
 
@@ -383,9 +399,38 @@ static unsigned net_rx_total,net_rx_valid,net_rx_hello,net_rx_offer,net_rx_ready
 static unsigned net_tx_punch,net_tx_punch_fail,net_rx_input,net_rx_input_reject,net_tx_input,net_tx_input_fail;
 static bool first_gameplay_input;
 
+/* Independent NETPLAY file logger. It deliberately does not call x360_log(). */
+static bool netplay_logging_enabled=false;
+
+static void net_log_reset(void) {
+    HANDLE f=CreateFileA("game:\\mk64-netplay.log",GENERIC_WRITE,FILE_SHARE_READ,
+        NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(f!=INVALID_HANDLE_VALUE)CloseHandle(f);
+}
+
 static void net_log(const char *fmt,...) {
-    if(!x360_logging_enabled())return;
-    char text[384];va_list ap;va_start(ap,fmt);_vsnprintf(text,sizeof(text)-1,fmt,ap);va_end(ap);text[sizeof(text)-1]=0;x360_log(text);
+    if(!netplay_logging_enabled)return;
+    char text[384];
+    va_list ap;va_start(ap,fmt);_vsnprintf(text,sizeof(text)-1,fmt,ap);va_end(ap);
+    text[sizeof(text)-1]=0;
+    OutputDebugStringA(text);
+    HANDLE f=CreateFileA("game:\\mk64-netplay.log",GENERIC_WRITE,FILE_SHARE_READ,
+        NULL,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(f!=INVALID_HANDLE_VALUE){
+        SetFilePointer(f,0,NULL,FILE_END);
+        DWORD written=0;
+        WriteFile(f,text,(DWORD)strlen(text),&written,NULL);
+        CloseHandle(f);
+    }
+}
+
+static void net_set_logging(bool enabled) {
+    if(enabled==netplay_logging_enabled)return;
+    netplay_logging_enabled=enabled;
+    if(enabled){
+        net_log_reset();
+        net_log("MK64NET4: NETPLAY LOGGING enabled\n");
+    }
 }
 static void reset_net_counters(){
     net_rx_total=net_rx_valid=net_rx_hello=net_rx_offer=net_rx_ready=net_rx_start=net_rx_ack=0;
@@ -429,6 +474,8 @@ static int send_host_message(mknet::Type t,const uint8_t *payload,int size){
 }
 
 static void close_network(){
+    /* MK360_PARTY_CLEAR_ON_CLOSE_V8 */
+    if(hosting)x360_party_clear_host();
     if(sock!=INVALID_SOCKET){
         if(hosting){
             int n=peer_count();
@@ -635,7 +682,7 @@ static void pump(){
                 }else{
                     idx=find_peer_address(from);
                     if(idx>=0){
-                        memcpy(peers[idx].nonce,p+12,16);peers[idx].ready=false;peers[idx].acked=false;peers[idx].best_rtt=0xFFFFFFFFU;
+                        memcpy(peers[idx].nonce,p+12,16);peers[idx].ready=false;peers[idx].acked=false;peers[idx].best_rtt=0xFFFFFFFFU;memset(&peers[idx].latency,0,sizeof(peers[idx].latency));
                         net_log("MK64NET4: P%u restarted handshake\n",peers[idx].slot+1);
                     }else{
                         int count=peer_count();
@@ -661,7 +708,8 @@ static void pump(){
 
             if(p[5]==mknet::READY&&!active&&!start_sent){
                 if(memcmp(q,ps.nonce,16)||q[20]!=ps.slot){net_log("MK64NET4: READY rejected P%u\n",ps.slot+1);continue;}
-                DWORD stamp=mknet::get32(q+16);DWORD rtt=now-stamp;if(rtt>10000)continue;
+                DWORD stamp=mknet::get32(q+16);DWORD rtt=now-stamp;if(stamp!=ps.last_offer||rtt>10000)continue;
+                ps.latency.add((unsigned)rtt);
                 if(rtt<ps.best_rtt)ps.best_rtt=rtt;ps.ready=true;ps.last_received=now;
                 net_log("MK64NET4: P%u READY rtt=%u ms\n",ps.slot+1,(unsigned)rtt);continue;
             }
@@ -674,8 +722,22 @@ static void pump(){
                 if(q[0]!=ps.slot)continue;ps.acked=true;ps.last_received=now;net_log("MK64NET4: P%u START_ACK\n",ps.slot+1);continue;
             }
             if((active||start_sent)&&p[5]==mknet::CLIENT_INPUT){
-                ++net_rx_input;bool accepted=stream.receive_client(ps.slot,p,n);
-                if(accepted){ps.last_received=now;ps.gameplay_seen=true;first_gameplay_input=true;if(start_sent)ps.acked=true;if(net_rx_input<=8)net_log("MK64NET4: P%u INPUT accepted frame=%u bytes=%d\n",ps.slot+1,(unsigned)stream.frame,n);}
+                ++net_rx_input;bool accepted=stream.receive_remote(ps.slot,p,n);
+                if(accepted){
+                    ps.last_received=now;ps.gameplay_seen=true;first_gameplay_input=true;if(start_sent)ps.acked=true;
+                    if(net_rx_input<=8)net_log("MK64NET4: P%u INPUT accepted frame=%u bytes=%d\n",ps.slot+1,(unsigned)stream.frame,n);
+                    /* 3P/4P low latency: relay this guest's input immediately to
+                     * every other guest. The complete FRAMESET remains enabled
+                     * below as recovery/redundancy and deterministic checking. */
+                    if(player_count>2){
+                        int pc=peer_count();
+                        for(int j=0;j<pc;++j){
+                            if(j==idx)continue;
+                            int sr=sendto(sock,(char*)p,n,0,(sockaddr*)&peers[j].addr,sizeof(peers[j].addr));++net_tx_input;
+                            if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: EARLY_RELAY P%u->P%u fail tx=%u frame=%u wsa=%d\n",ps.slot+1,peers[j].slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}
+                        }
+                    }
+                }
                 else{++net_rx_input_reject;if(net_rx_input_reject<=12)net_log("MK64NET4: P%u INPUT rejected frame=%u fault=%u\n",ps.slot+1,(unsigned)stream.frame,stream.fault?1U:0U);}
                 continue;
             }
@@ -690,7 +752,7 @@ static void pump(){
             }
             if(!host_session_known||memcmp(p+12,session,16))continue;
             if(!same_address(host_peer,from)) {
-                if(same_ip(host_peer,from)&&(p[5]==mknet::START||p[5]==mknet::FRAMESET)) {
+                if(same_ip(host_peer,from)&&(p[5]==mknet::START||p[5]==mknet::FRAMESET||p[5]==mknet::CLIENT_INPUT)) {
                     host_peer=from;net_log("MK64NET4: host NAT endpoint rebound\n");
                 } else continue;
             }
@@ -700,6 +762,14 @@ static void pump(){
                 uint8_t ack=uint8_t(local_slot);send_host_message(mknet::START_ACK,&ack,1);last_received=now;continue;
             }
             if(active&&p[5]==mknet::BOOT_GO){boot.complete=true;last_received=now;continue;}
+            if(active&&p[5]==mknet::CLIENT_INPUT){
+                unsigned source=q[0];
+                if(source>=player_count||source==local_slot){++net_rx_input_reject;continue;}
+                ++net_rx_input;bool accepted=stream.receive_remote(source,p,n);
+                if(accepted){last_received=now;first_gameplay_input=true;if(net_rx_input<=16)net_log("MK64NET4: REMOTE_INPUT early accepted P%u frame=%u bytes=%d\n",source+1,(unsigned)stream.frame,n);}
+                else{++net_rx_input_reject;if(net_rx_input_reject<=12)net_log("MK64NET4: REMOTE_INPUT early rejected P%u frame=%u fault=%u\n",source+1,(unsigned)stream.frame,stream.fault?1U:0U);}
+                continue;
+            }
             if(active&&p[5]==mknet::FRAMESET){
                 ++net_rx_input;bool accepted=stream.receive_frameset(p,n);
                 if(accepted){last_received=now;first_gameplay_input=true;if(net_rx_input<=8)net_log("MK64NET4: FRAMESET accepted frame=%u bytes=%d\n",(unsigned)stream.frame,n);}
@@ -722,12 +792,68 @@ static bool wait_for_xnet_route(){
     net_log("MK64NET4: Internet route NOT ready after 15 seconds\n");return false;
 }
 
+/* MK360_PARTY_AUTOJOIN_V8 */
+static bool mk360_party_host_lookup(sockaddr_in &out,char *tag,int tagSize) {
+    unsigned int ip=0,token=0;
+    unsigned short port=0;
+    if(!x360_party_find_host(&ip,&port,&token,tag,(unsigned int)tagSize))
+        return false;
+
+    memset(&out,0,sizeof(out));
+    out.sin_family=AF_INET;
+    out.sin_addr.s_addr=htonl(ip);
+    out.sin_port=htons(port);
+
+    net_log("MK64NET4: Party host found tag=%s endpoint=%u.%u.%u.%u:%u token=%08X\n",
+        tag&&tag[0]?tag:"?",
+        (ip>>24)&255,(ip>>16)&255,(ip>>8)&255,ip&255,
+        (unsigned)port,(unsigned)token);
+    return true;
+}
+
 static bool host_ip_editor(sockaddr_in &out){
+    DWORD last_party_autoscan=0;
+    char partyAutoTag[64];partyAutoTag[0]=0;
+
     char digits[16]="000.000.000.000";int cursor=0;
     while(true){
         char marker[80];memset(marker,' ',strlen(digits));marker[strlen(digits)]=0;marker[cursor]='^';
-        screen("JOIN 2-4 PLAYER GAME",digits,marker,"ENTER HOST PUBLIC IPV4","A CONNECT - UDP 6464");WORD p=pressed();
+        screen("JOIN 2-4 PLAYER GAME",digits,marker,"WAIT HERE - ACCEPT HOST PARTY INVITE IN GUIDE","AUTO-CONNECTS AFTER PARTY JOIN - A MANUAL IP");WORD p=pressed();
+
+        /*
+         * V11: The joining player may stay on this screen while accepting the
+         * normal Xbox LIVE Party invitation in the Guide overlay.  Once Party
+         * membership updates, XPartyGetUserList exposes the host's MK360
+         * custom data and we feed the advertised endpoint into the existing
+         * UDP join path.
+         */
+        DWORD partyNow=GetTickCount();
+        if(partyNow-last_party_autoscan>=750){
+            partyAutoTag[0]=0;
+            if(mk360_party_host_lookup(out,partyAutoTag,sizeof(partyAutoTag))){
+                char found[96];
+                _snprintf(found,sizeof(found)-1,"HOST FOUND: %s",partyAutoTag[0]?partyAutoTag:"PARTY MEMBER");
+                found[sizeof(found)-1]=0;
+                screen("XBOX PARTY HOST FOUND",found,"PARTY INFO RECEIVED","CONNECTING TO HOST...","");
+                Sleep(650);
+                return true;
+            }
+            last_party_autoscan=partyNow;
+        }
         if(p&XINPUT_GAMEPAD_B)return false;
+        if(p&XINPUT_GAMEPAD_X){
+            char partyTag[64];partyTag[0]=0;
+            if(mk360_party_host_lookup(out,partyTag,sizeof(partyTag))){
+                char found[96];_snprintf(found,sizeof(found)-1,"FOUND HOST: %s",partyTag[0]?partyTag:"PARTY MEMBER");found[sizeof(found)-1]=0;
+                screen("PARTY HOST FOUND",found,"CONNECTING WITH MK360 UDP NETCODE","","");
+                Sleep(750);
+                return true;
+            }
+            screen("JOIN HOST FROM PARTY","NO REMOTE MK360 HOST FOUND","JOIN THE HOST'S XBOX LIVE PARTY","THEN PRESS X AGAIN","B BACK");
+            Sleep(1200);
+            prev_buttons=0;
+            continue;
+        }
         if(p&XINPUT_GAMEPAD_DPAD_LEFT){do{cursor=(cursor+14)%15;}while(digits[cursor]=='.');}
         if(p&XINPUT_GAMEPAD_DPAD_RIGHT){do{cursor=(cursor+1)%15;}while(digits[cursor]=='.');}
         if(p&XINPUT_GAMEPAD_DPAD_UP)digits[cursor]=digits[cursor]=='9'?'0':digits[cursor]+1;
@@ -750,11 +876,18 @@ static bool lobby(bool host){
     if(host){
         strcpy(public_address,"DISCOVERING PUBLIC ADDRESS");public_ip();screen("HOST 2-4 PLAYER GAME",public_address,local_address,"SETTING UP UDP 6464 AUTOMATICALLY","");
         bool mapped=map_router(public_address);net_log("MK64NET4: host ready public=%s upnp=%s\n",public_address,mapped?"OK":"NO");
+        uint32_t partyIp=0;uint16_t partyPort=0;
+        if(mknet::parse_endpoint(public_address,partyIp,partyPort)){
+            HRESULT phr=x360_party_publish_host((unsigned int)partyIp,(unsigned short)partyPort,(unsigned int)mknet::get32(session));
+            net_log("MK64NET4: Party host advertisement initial hr=0x%08X endpoint=%s\n",(unsigned)phr,public_address);
+        }else{
+            net_log("MK64NET4: Party host advertisement skipped - public endpoint unavailable\n");
+        }
     }else{
         if(!host_ip_editor(join_target)){close_network();return false;}host_peer=join_target;char target[80];peer_text(target,join_target);net_log("MK64NET4: join target %s\n",target);
     }
 
-    DWORD begin=GetTickCount();last_received=begin;DWORD last_hello=0;DWORD last_start_send=0;
+    DWORD begin=GetTickCount();last_received=begin;DWORD last_hello=0;DWORD last_start_send=0;DWORD last_party_publish=0;
     while(!active&&!failed){
         pump();WORD p=pressed();if(p&XINPUT_GAMEPAD_B){close_network();return false;}DWORD now=GetTickCount();
         if(!hosting&&!host_session_known&&now-last_hello>=250){
@@ -763,12 +896,30 @@ static bool lobby(bool host){
 
         if(hosting){
             prune_prestart_timeouts(now);int n=peer_count();
+            if(now-last_party_publish>=2000){
+                uint32_t pip=0;uint16_t pport=0;
+                if(mknet::parse_endpoint(public_address,pip,pport))
+                    x360_party_publish_host((unsigned int)pip,(unsigned short)pport,(unsigned int)mknet::get32(session));
+                last_party_publish=now;
+            }
+            if(!start_sent&&(p&XINPUT_GAMEPAD_X)){
+                uint32_t pip=0;uint16_t pport=0;
+                if(mknet::parse_endpoint(public_address,pip,pport))
+                    x360_party_publish_host((unsigned int)pip,(unsigned short)pport,(unsigned int)mknet::get32(session));
+                DWORD pir=x360_party_open_social_ui();
+                net_log("MK64NET4: Party social UI result=0x%08X\n",(unsigned)pir);
+                prev_buttons=0;
+            }
             if(!start_sent){for(int i=0;i<n;++i)if(now-peers[i].last_offer>=1000)send_offer(i);}
             if(all_ready()&&!start_sent&&(p&XINPUT_GAMEPAD_A)){
-                unsigned worst=0;for(int i=0;i<n;++i)if(peers[i].best_rtt!=0xFFFFFFFFU&&peers[i].best_rtt>worst)worst=peers[i].best_rtt;
-                /* Host relay takes up to a full worst-peer RTT between clients, plus jitter. */
-                unsigned d=(worst*30+999)/1000+2;chosen_delay=d<2?2:d>8?8:d;player_count=(unsigned)n+1;local_slot=0;stream.reset(chosen_delay,player_count,0);boot.reset(player_count);start_sent=true;last_start_send=0;
-                for(int i=0;i<n;++i)peers[i].acked=false;net_log("MK64NET4: starting %u players delay=%u worstRTT=%u\n",player_count,chosen_delay,worst);
+                unsigned worst=0,second=0;
+                for(int i=0;i<n;++i){unsigned b=peers[i].latency.budget();if(b>=worst){second=worst;worst=b;}else if(b>second)second=b;}
+                player_count=(unsigned)n+1;
+                /* 2P keeps the proven direct-host formula. 3P/4P size the
+                 * buffer for the longest early-relayed guest-to-guest path. */
+                chosen_delay=(player_count==2)?mknet::input_delay_2p(worst):mknet::input_delay_early_relay(worst,second);
+                local_slot=0;stream.reset(chosen_delay,player_count,0);boot.reset(player_count);start_sent=true;last_start_send=0;
+                for(int i=0;i<n;++i)peers[i].acked=false;net_log("MK64NET4: starting %u players delay=%u budgetRTT=%u secondRTT=%u mode=%s\n",player_count,chosen_delay,worst,second,player_count==2?"2P-EARLY":"EARLY-RELAY");
             }
             if(start_sent&&now-last_start_send>=100){for(int i=0;i<n;++i)if(!peers[i].acked)send_start(i);last_start_send=now;}
             if(start_sent&&all_acked()){active=true;net_log("MK64NET4: all START ACKs received; host active\n");break;}
@@ -780,7 +931,16 @@ static bool lobby(bool host){
             else _snprintf(status,sizeof(status)-1,"PLAYERS %d/4 - READY %d/%d",n+1,ready_count(),n);
             status[sizeof(status)-1]=0;
             _snprintf(diag,sizeof(diag)-1,"RX=%u V=%u H=%u R=%u",net_rx_total,net_rx_valid,net_rx_hello,net_rx_ready);diag[sizeof(diag)-1]=0;
-            screen("HOST 2-4 PLAYER GAME",public_address,status,diag,upnp_mapped?"UDP 6464 AUTO-MAPPED":"UDP 6464 MUST BE REACHABLE");
+            {
+                const bool partyReady=x360_party_is_active()!=0;
+                const char *partyLine=partyReady
+                    ?"X: OPEN FRIENDS - SELECT FRIEND - INVITE TO PARTY"
+                    :"X: START/OPEN XBOX LIVE PARTY";
+                const char *friendLine=partyReady
+                    ?"FRIEND: JOIN PARTY, RUN MK360, CHOOSE JOIN, PRESS X"
+                    :"AFTER STARTING PARTY: RETURN HERE AND PRESS X AGAIN";
+                screen("HOST 2-4 PLAYER GAME",public_address,status,partyLine,friendLine);
+            }
             if(start_sent){for(int i=0;i<n;++i)if(now-peers[i].last_received>30000){net_log("MK64NET4: P%u start timeout\n",peers[i].slot+1);failed=true;}}
         }else{
             char status[80],diag[80];if(host_session_known)_snprintf(status,sizeof(status)-1,"ASSIGNED P%u - WAITING FOR HOST",assigned_slot+1);else _snprintf(status,sizeof(status)-1,"CONNECTING TO HOST");status[sizeof(status)-1]=0;
@@ -809,15 +969,106 @@ static void mk_stress_menu(void){
     }
 }
 
+
+static void controls_menu(){
+    int player=0,row=0;bool dirty=false;
+    x360_controls_load();
+    for(;;){
+        char title[64],lines[4][96];_snprintf(title,sizeof(title),"CONTROLLER %d - REBINDING",player+1);
+        const int page=(row/4)*4;
+        for(int i=0;i<4;++i){int item=page+i;
+            if(item<14)_snprintf(lines[i],sizeof(lines[i]),"%c %s: %s",item==row?'>':' ',x360_control_action(item),x360_control_binding(player,item));
+            else if(item==14)_snprintf(lines[i],sizeof(lines[i]),"%c STEERING: %s STICK",item==row?'>':' ',x360_control_stick(player,0)?"RIGHT":"LEFT");
+            else _snprintf(lines[i],sizeof(lines[i]),"%c DEAD ZONE: %d PERCENT",item==row?'>':' ',x360_control_deadzone(player,0));
+            lines[i][sizeof(lines[i])-1]=0;
+        }
+        screen(title,lines[0],lines[1],lines[2],lines[3],"A REBIND    X CLEAR    Y DEFAULTS","LB/RB CONTROLLER   LEFT/RIGHT ADJUST   B SAVE/BACK");
+        WORD p=pressed(false);
+        if(p&XINPUT_GAMEPAD_B){if(dirty){int saved=x360_controls_save();screen(saved?"CONTROLS SAVED":"CONTROLS ACTIVE",saved?"READY FOR NEXT LAUNCH":"COULD NOT SAVE TO GAME FOLDER","",saved?"":"USING THESE SETTINGS FOR THIS LAUNCH","","","B BACK");Sleep(650);}return;}
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%16;if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+15)%16;
+        if(p&XINPUT_GAMEPAD_LEFT_SHOULDER)player=(player+3)%4;if(p&XINPUT_GAMEPAD_RIGHT_SHOULDER)player=(player+1)%4;
+        if(p&XINPUT_GAMEPAD_Y){x360_control_defaults(player);dirty=true;}
+        if(row<14&&(p&XINPUT_GAMEPAD_X)){x360_control_bind(player,row,255);dirty=true;}
+        if(row==14&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))){x360_control_stick(player,1);dirty=true;}
+        if(row==15&&(p&(XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))){x360_control_deadzone(player,(p&XINPUT_GAMEPAD_DPAD_LEFT)?-1:1);dirty=true;}
+        if(row<14&&(p&XINPUT_GAMEPAD_A)){
+            bool released=false;
+            for(;;){screen("PRESS A CONTROL",x360_control_action(row),"BUTTON, TRIGGER OR STICK DIRECTION","BACK CANCELS THIS BINDING","","RELEASE THE CURRENT CONTROL FIRST","MENU NAVIGATION ALWAYS USES DEFAULT BUTTONS");
+                unsigned down=x360_controls_down();if(!down)released=true;
+                if(released&&down){if(down&(1U<<8))break;for(int b=0;b<24;++b)if(down&(1U<<b)){x360_control_bind(player,row,b);dirty=true;break;}break;}
+                Sleep(16);
+            }
+            // Consume the capture press; it must not also clear/reset another row.
+            XINPUT_STATE state;memset(&state,0,sizeof(state));XInputGetState(0,&state);prev_buttons=state.Gamepad.wButtons;
+        }
+        Sleep(16);
+    }
+}
+/* MK360_INDEPENDENT_LOGGER_MENU_V1 */
+static void logging_menu(){
+    int row=0;prev_buttons=0;
+    for(;;){
+        char a[80],b[80],c[80],d[80];
+        _snprintf(a,sizeof(a)-1,"%c GAME LOGGING: %s",row==0?'>':' ',x360_logging_enabled()?"ON":"OFF");a[sizeof(a)-1]=0;
+        _snprintf(b,sizeof(b)-1,"%c NETPLAY LOGGING: %s",row==1?'>':' ',netplay_logging_enabled?"ON":"OFF");b[sizeof(b)-1]=0;
+        _snprintf(c,sizeof(c)-1,"%c PARTY LOGGING: %s",row==2?'>':' ',x360_party_logging_enabled()?"ON":"OFF");c[sizeof(c)-1]=0;
+        _snprintf(d,sizeof(d)-1,"SAFETY: ENABLING ONE TURNS THE OTHER TWO OFF");d[sizeof(d)-1]=0;
+        screen("LOGGING SETTINGS",a,b,c,d,"A / LEFT / RIGHT TOGGLE    B BACK","ONE FILE LOGGER AT A TIME");
+        WORD p=pressed(false);
+        if(p&XINPUT_GAMEPAD_B){prev_buttons=0;return;}
+        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+2)%3;
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%3;
+        if(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)){
+            if(row==0){
+                const bool on=x360_logging_enabled()==0;
+                if(on){net_set_logging(false);x360_party_set_logging(0);}
+                x360_set_logging(on?1:0);
+            }else if(row==1){
+                const bool on=!netplay_logging_enabled;
+                if(on){x360_set_logging(0);x360_party_set_logging(0);}
+                net_set_logging(on);
+            }else{
+                const bool on=x360_party_logging_enabled()==0;
+                if(on){x360_set_logging(0);net_set_logging(false);}
+                x360_party_set_logging(on?1:0);
+            }
+            prev_buttons=0;
+        }
+        Sleep(16);
+    }
+}
+
+static void options_menu(){
+    int row=0;prev_buttons=0;
+    for(;;){
+        char aspect[64],controls[80],logging[80],hint[80];
+        _snprintf(aspect,sizeof(aspect)-1,"%c ASPECT: %s",row==0?'>':' ',display_wide?"16:9":"4:3");aspect[sizeof(aspect)-1]=0;
+        _snprintf(controls,sizeof(controls)-1,"%c CONTROLLER REBINDING",row==1?'>':' ');controls[sizeof(controls)-1]=0;
+        _snprintf(logging,sizeof(logging)-1,"%c LOGGING SETTINGS",row==2?'>':' ');logging[sizeof(logging)-1]=0;
+        _snprintf(hint,sizeof(hint)-1,"GAME:%s  NET:%s  PARTY:%s",x360_logging_enabled()?"ON":"OFF",netplay_logging_enabled?"ON":"OFF",x360_party_logging_enabled()?"ON":"OFF");hint[sizeof(hint)-1]=0;
+        screen("OPTIONS",aspect,controls,logging,hint,"A SELECT    LEFT/RIGHT CHANGE ASPECT    B BACK","LOGGERS ARE CONTROLLED SEPARATELY");
+        WORD p=pressed(false);
+        if(p&XINPUT_GAMEPAD_B){prev_buttons=0;return;}
+        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+2)%3;
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%3;
+        if(row==0&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))display_wide=!display_wide;
+        if(row==1&&(p&XINPUT_GAMEPAD_A)){controls_menu();prev_buttons=0;}
+        if(row==2&&(p&XINPUT_GAMEPAD_A)){logging_menu();prev_buttons=0;}
+        Sleep(16);
+    }
+}
+
 extern "C" int x360_net_boot_menu(void){
+    x360_controls_load();
     int selection=0;
     for(;;){
-        char stress_line[80],stress_item[80];mk_stress_desc(stress_line,sizeof(stress_line));_snprintf(stress_item,sizeof(stress_item)-1,"%c %s",selection==3?'>':' ',stress_line);stress_item[sizeof(stress_item)-1]=0;
+        char stress_item[80];_snprintf(stress_item,sizeof(stress_item)-1,"%c OPTIONS / CONTROLS / LOGGING   %s",selection==3?'>':' ',display_wide?"16:9":"4:3");stress_item[sizeof(stress_item)-1]=0;
         screen("MARIO KART 64 - 2-4P NETPLAY",selection==0?"> OFFLINE":"  OFFLINE",selection==1?"> HOST 2-4 PLAYER GAME":"  HOST 2-4 PLAYER GAME",selection==2?"> JOIN 2-4 PLAYER GAME":"  JOIN 2-4 PLAYER GAME",stress_item);
         WORD p=pressed();if(p&XINPUT_GAMEPAD_DPAD_DOWN)selection=(selection+1)%4;if(p&XINPUT_GAMEPAD_DPAD_UP)selection=(selection+3)%4;
+        if(p&XINPUT_GAMEPAD_X){mk_stress_menu();continue;}
         if(p&XINPUT_GAMEPAD_A){
             if(selection==0){close_network();return 0;}
-            if(selection==3){mk_stress_menu();continue;}
+            if(selection==3){options_menu();continue;}
             if(lobby(selection==1))return 1;
             while(true){screen("CONNECTION NOT ESTABLISHED","NO GAME WAS STARTED","ALL GUESTS USE THE SAME HOST IP","CHECK UDP 6464 / NETWORK SETTINGS","A RETURN TO MENU");if(pressed()&XINPUT_GAMEPAD_A)break;Sleep(16);}
         }
@@ -857,15 +1108,26 @@ extern "C" void x360_net_controllers(void *pads_,int count){
         if(!boot.complete)failed=true;
     }
     mknet::Pad input={pads[0].err_no?0:pads[0].button,pads[0].err_no?0:pads[0].stick_x,pads[0].err_no?0:pads[0].stick_y};
-    stream.sample_local(input,x360_net_state_hash());DWORD begin=GetTickCount(),sent=0;uint32_t sent_complete=0xFFFFFFFFU;mknet::Pad frame_pads[mknet::MAX_PLAYERS];
+    stream.sample_local(input,x360_net_state_hash());DWORD begin=GetTickCount(),sent=0;DWORD last_wait_screen=0;uint32_t sent_complete=0xFFFFFFFFU;mknet::Pad frame_pads[mknet::MAX_PLAYERS];
     while(true){
         pump();DWORD now=GetTickCount();
         if(!sent||now-sent>=15||(hosting&&sent_complete!=stream.latest_complete)){
             uint8_t packet[mknet::MAX_PACKET];int n;
             if(hosting){
-                n=stream.frameset_packet(packet,session);int pc=peer_count();for(int i=0;i<pc;++i){int sr=sendto(sock,(char*)packet,n,0,(sockaddr*)&peers[i].addr,sizeof(peers[i].addr));++net_tx_input;if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: FRAMESET send fail P%u tx=%u frame=%u wsa=%d\n",peers[i].slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}}
+                int pc=peer_count();
+                /* Send P1 input immediately to every guest, without waiting for
+                 * the other guest inputs needed for a complete FRAMESET. */
+                for(int i=0;i<pc;++i){
+                    n=stream.client_packet(packet,session,peers[i].slot);
+                    if(!n)break;
+                    int sr=sendto(sock,(char*)packet,n,0,(sockaddr*)&peers[i].addr,sizeof(peers[i].addr));++net_tx_input;
+                    if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: HOST_INPUT early send fail P%u tx=%u frame=%u wsa=%d\n",peers[i].slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}
+                }
+                /* Keep authoritative complete FRAMESET packets for redundancy,
+                 * recovery and deterministic cross-checking. */
+                for(int i=0;i<pc;++i){n=stream.frameset_packet(packet,session,peers[i].slot);if(!n)break;int sr=sendto(sock,(char*)packet,n,0,(sockaddr*)&peers[i].addr,sizeof(peers[i].addr));++net_tx_input;if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: FRAMESET send fail P%u tx=%u frame=%u wsa=%d\n",peers[i].slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}}
             }else{
-                n=stream.client_packet(packet,session);int sr=sendto(sock,(char*)packet,n,0,(sockaddr*)&host_peer,sizeof(host_peer));++net_tx_input;if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: CLIENT_INPUT send fail P%u tx=%u frame=%u wsa=%d\n",local_slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}
+                n=stream.client_packet(packet,session);if(!n)break;int sr=sendto(sock,(char*)packet,n,0,(sockaddr*)&host_peer,sizeof(host_peer));++net_tx_input;if(sr==SOCKET_ERROR){++net_tx_input_fail;if(net_tx_input_fail<=12)net_log("MK64NET4: CLIENT_INPUT send fail P%u tx=%u frame=%u wsa=%d\n",local_slot+1,net_tx_input,(unsigned)stream.frame,WSAGetLastError());}
             }
             sent=now;sent_complete=stream.latest_complete;
         }
@@ -879,7 +1141,7 @@ extern "C" void x360_net_controllers(void *pads_,int count){
             for(int i=(int)player_count;i<count;++i)pads[i].err_no=1;
             return;
         }
-        if(now-begin>1000){char diag[96],who[80];_snprintf(diag,sizeof(diag)-1,"%uP FRAME=%u RX=%u REJ=%u TXF=%u",player_count,(unsigned)stream.frame,net_rx_input,net_rx_input_reject,net_tx_input_fail);diag[sizeof(diag)-1]=0;if(hosting)_snprintf(who,sizeof(who)-1,"WAITING FOR REMOTE PLAYERS");else _snprintf(who,sizeof(who)-1,"P%u WAITING FOR HOST",local_slot+1);who[sizeof(who)-1]=0;screen("WAITING FOR PLAYERS","GAME PAUSED - RETRYING CONNECTION",who,diag,"BACK AND START EXIT GAME");}
+        if(now-begin>1000&&(!last_wait_screen||now-last_wait_screen>=250)){last_wait_screen=now;char diag[96],who[80];_snprintf(diag,sizeof(diag)-1,"%uP FRAME=%u RX=%u REJ=%u TXF=%u",player_count,(unsigned)stream.frame,net_rx_input,net_rx_input_reject,net_tx_input_fail);diag[sizeof(diag)-1]=0;if(hosting)_snprintf(who,sizeof(who)-1,"WAITING FOR REMOTE PLAYERS");else _snprintf(who,sizeof(who)-1,"P%u WAITING FOR HOST",local_slot+1);who[sizeof(who)-1]=0;screen("WAITING FOR PLAYERS","GAME PAUSED - RETRYING CONNECTION",who,diag,"BACK AND START EXIT GAME");}
         Sleep(1);
     }
 

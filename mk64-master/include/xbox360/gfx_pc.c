@@ -25,6 +25,9 @@ static uintptr_t rspSegments[16];
 #include <PR/gbi.h>
 
 #include "gfx_pc.h"
+#include "netplay.h"
+#include "netplay_view.h"
+extern "C" { extern int gGamestate,gActiveScreenMode,gPlayerCountSelection1; }
 #include "gfx_cc.h"
 #include "gfx_window_manager_api.h"
 #include "gfx_rendering_api.h"
@@ -134,11 +137,11 @@ static bool x360_invalid_texture_ready[2];
 struct ColorCombiner {
     uint64_t cc_id;
     struct ShaderProgram *prg;
-    uint8_t shader_input_mapping[2][4];
+    uint32_t options;
 };
 
 static struct ColorCombiner color_combiner_pool[64];
-static uint8_t color_combiner_pool_size;
+static unsigned color_combiner_pool_size;
 
 static struct RSP {
     float modelview_matrix_stack[11][4][4];
@@ -206,7 +209,8 @@ static struct RDP {
     bool textures_changed[2];
 
     uint32_t other_mode_l, other_mode_h;
-    uint32_t combine_mode;
+    uint64_t combine_mode;
+    uint8_t prim_lod_fraction;
 
     struct RGBA env_color, prim_color, fog_color, fill_color;
     struct XYWidthHeight viewport, scissor;
@@ -352,7 +356,7 @@ static float inv_ratio_y = 1.f;
 
 static bool dropped_frame;
 
-static float buf_vbo[MAX_BUFFERED * (26 * 3)]; // 3 vertices in a triangle and 26 floats per vtx
+static float buf_vbo[MAX_BUFFERED * (28 * 3)]; // 3 vertices in a triangle and 28 floats per vtx
 static size_t buf_vbo_len;
 static size_t buf_vbo_num_tris;
 
@@ -432,69 +436,26 @@ static struct ShaderProgram *gfx_lookup_or_create_shader_program(uint32_t shader
     return prg;
 }
 
-static void gfx_generate_cc(struct ColorCombiner *comb, uint64_t cc_id) {
-    uint8_t c[2][4];
-    uint32_t shader_id = (uint32_t)(cc_id >> 8) & 0x0F000000U;
-    uint8_t shader_input_mapping[2][4] = {{0}};
-    for (int i = 0; i < 4; i++) {
-        c[0][i] = (cc_id >> (i * 4)) & 15;
-        c[1][i] = (cc_id >> (16 + i * 4)) & 15;
-    }
-    for (int i = 0; i < 2; i++) {
-        if (c[i][0] == c[i][1] || c[i][2] == CC_0) {
-            c[i][0] = c[i][1] = c[i][2] = 0;
-        }
-        uint8_t input_number[16] = {0};
-        int next_input_number = SHADER_INPUT_1;
-        for (int j = 0; j < 4; j++) {
-            int val = 0;
-            switch (c[i][j]) {
-                case CC_0:
-                    break;
-                case CC_TEXEL0:
-                    val = SHADER_TEXEL0;
-                    break;
-                case CC_TEXEL1:
-                    val = SHADER_TEXEL1;
-                    break;
-                case CC_TEXEL0A:
-                    val = SHADER_TEXEL0A;
-                    break;
-                case CC_PRIM:
-                case CC_SHADE:
-                case CC_ENV:
-                case CC_PRIMA:
-                case CC_ONE:
-                case CC_LOD:
-                    if (input_number[c[i][j]] == 0) {
-                        shader_input_mapping[i][next_input_number - 1] = c[i][j];
-                        input_number[c[i][j]] = next_input_number++;
-                    }
-                    val = input_number[c[i][j]];
-                    break;
-            }
-            shader_id |= val << (i * 12 + j * 3);
-        }
-    }
-    comb->cc_id = cc_id;
-    comb->prg = gfx_lookup_or_create_shader_program(shader_id);
-    memcpy(comb->shader_input_mapping, shader_input_mapping, sizeof(shader_input_mapping));
+static void gfx_generate_cc(struct ColorCombiner *comb,uint64_t cc_id,uint32_t options) {
+    comb->cc_id=cc_id;comb->options=options;
+    comb->prg=gfx_lookup_or_create_shader_program(gfx_cc_register(cc_id,options));
 }
 
-static struct ColorCombiner *gfx_lookup_or_create_color_combiner(uint64_t cc_id) {
+static struct ColorCombiner *gfx_lookup_or_create_color_combiner(uint64_t cc_id,uint32_t options) {
     static struct ColorCombiner *prev_combiner;
-    if (prev_combiner != NULL && prev_combiner->cc_id == cc_id) {
+    if (prev_combiner != NULL && prev_combiner->cc_id == cc_id && prev_combiner->options==options) {
         return prev_combiner;
     }
 
     for (size_t i = 0; i < color_combiner_pool_size; i++) {
-        if (color_combiner_pool[i].cc_id == cc_id) {
+        if (color_combiner_pool[i].cc_id == cc_id && color_combiner_pool[i].options==options) {
             return prev_combiner = &color_combiner_pool[i];
         }
     }
     gfx_flush();
+    if(color_combiner_pool_size==sizeof(color_combiner_pool)/sizeof(color_combiner_pool[0]))color_combiner_pool_size=0;
     struct ColorCombiner *comb = &color_combiner_pool[color_combiner_pool_size++];
-    gfx_generate_cc(comb, cc_id);
+    gfx_generate_cc(comb, cc_id, options);
     return prev_combiner = comb;
 }
 
@@ -520,6 +481,8 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     while (*node != NULL && *node - gfx_texture_cache.pool < (int)gfx_texture_cache.pool_pos) {
         if ((*node)->texture_addr == orig_addr && (*node)->fmt == fmt && (*node)->siz == siz
             && (*node)->texture_unit == tile
+            && (*node)->content_hash == content
+            && (fmt != G_IM_FMT_CI || (*node)->palette_hash == palette_content)
             && (*node)->source_size == size
             && (*node)->line_bytes == gfx_texture_tile(tile)->line_size_bytes
             && (fmt != G_IM_FMT_CI ||
@@ -542,7 +505,7 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
                 static unsigned x360_b17g6d_verify_logs;
                 const struct X360LoadedTexture *verify_l = gfx_loaded_texture(tile);
                 uint32_t verify_ph = 0;
-                if (fmt == G_IM_FMT_CI && rdp.palette &&
+                if (x360_logging_enabled() && fmt == G_IM_FMT_CI && rdp.palette &&
                     rdp.palette_bytes && rdp.palette_bytes <= 512) {
                     verify_ph = x360_texture_hash(rdp.palette, rdp.palette_bytes);
                 }
@@ -1346,8 +1309,22 @@ static void gfx_sp_pop_matrix(uint32_t count) {
     }
 }
 
+static inline bool x360_legacy_wide_display(void) {
+    return x360_display_aspect() > 1.5f;
+}
+
 static inline float gfx_adjust_x_for_aspect_ratio(float x) {
-    return x * (4.0f / 3.0f) / (float)gfx_current_dimensions.aspect_ratio;
+    if (!x360_legacy_wide_display()) {
+        return x;
+    }
+
+    const float physical_aspect =
+        gfx_current_dimensions.aspect_ratio > 0.1f
+            ? (float)gfx_current_dimensions.aspect_ratio
+            : (16.0f / 9.0f);
+
+    /* Exact pre-display-option 16:9 behavior. */
+    return x * (4.0f / 3.0f) / physical_aspect;
 }
 
 static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
@@ -1369,6 +1346,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
 
         x = gfx_adjust_x_for_aspect_ratio(x);
 
+        if(x360_logging_enabled() && x360_transform_log_count<6) {
         for (int axis = 0; axis < 3; ++axis) {
             float value = (float)v->ob[axis];
             if (value < object_min[axis]) object_min[axis] = value;
@@ -1378,6 +1356,8 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         for (int axis = 0; axis < 4; ++axis) {
             if (clip_values[axis] < clip_min[axis]) clip_min[axis] = clip_values[axis];
             if (clip_values[axis] > clip_max[axis]) clip_max[axis] = clip_values[axis];
+        }
+
         }
 
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
@@ -1462,7 +1442,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->z = z;
         d->w = w;
 
-        if (false && (rsp.geometry_mode & G_FOG)) {
+        if (rsp.geometry_mode & G_FOG) {
             w = (w == 0.f) ? 1.f / 0.001f : 1.f / w;
             const float winv = w < 0.0f ? 32767.0f : w;
             float fog_z = z * winv * rsp.fog_mul + rsp.fog_offset;
@@ -1494,7 +1474,7 @@ static inline struct ColorCombiner *gfx_pick_combiner(bool *out_use_fog, bool *o
     uint64_t cc_id = rdp.combine_mode;
 
     bool use_alpha = (rdp.other_mode_l & (G_BL_A_MEM << 18)) == 0;
-    const bool use_fog = false && (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
+    const bool use_fog = (rsp.geometry_mode & G_FOG) && (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
     const bool texture_edge = (rdp.other_mode_l & CVG_X_ALPHA) == CVG_X_ALPHA;
     const bool use_noise = (rdp.other_mode_l & G_AC_DITHER) == G_AC_DITHER;
 
@@ -1502,16 +1482,13 @@ static inline struct ColorCombiner *gfx_pick_combiner(bool *out_use_fog, bool *o
         use_alpha = true;
     }
 
-    if (use_alpha) cc_id |= (uint64_t)SHADER_OPT_ALPHA << 8;
-    if (use_fog) cc_id |= (uint64_t)SHADER_OPT_FOG << 8;
-    if (texture_edge) cc_id |= (uint64_t)SHADER_OPT_TEXTURE_EDGE << 8;
-    if (use_noise) cc_id |= (uint64_t)SHADER_OPT_NOISE << 8;
-
-    if (!use_alpha) {
-        cc_id &= ~((uint64_t)0xFFFF0000U);
-    }
-
-    struct ColorCombiner *comb = gfx_lookup_or_create_color_combiner(cc_id);
+    uint32_t options=0;
+    if(use_alpha)options|=SHADER_OPT_ALPHA;
+    if(use_fog)options|=SHADER_OPT_FOG;
+    if(texture_edge)options|=SHADER_OPT_TEXTURE_EDGE;
+    if(use_noise)options|=SHADER_OPT_NOISE;
+    if((rdp.other_mode_h&(3U<<G_MDSFT_CYCLETYPE))==G_CYC_2CYCLE)options|=SHADER_OPT_2CYCLE;
+    struct ColorCombiner *comb=gfx_lookup_or_create_color_combiner(cc_id,options);
     struct ShaderProgram *prg = comb->prg;
     if (prg != rendering_state.shader_program) {
         gfx_flush();
@@ -1666,8 +1643,7 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
             }
         }
     }
-    const uint32_t floats_per_vertex = 4 + (use_texture ? 2 : 0) + (use_fog ? 4 : 0) +
-                                       num_inputs * (use_alpha ? 4 : 3);
+    const uint32_t floats_per_vertex = 4 + (used_textures[0]?2:0) + (used_textures[1]?2:0) + (use_fog ? 4 : 0) + num_inputs * 4;
     if (buf_vbo_len != 0 &&
         (x360_gfx_batch_layout.program != rendering_state.shader_program ||
          x360_gfx_batch_layout.floats_per_vertex != floats_per_vertex ||
@@ -1690,10 +1666,6 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
         x360_gfx_batch_layout.use_fog = use_fog;
         x360_gfx_batch_layout.use_alpha = use_alpha;
     }
-    const int texture_index = used_textures[0] ? 0 : 1;
-    const struct TextureHashmapNode *texture = rendering_state.textures[texture_index];
-    const uint32_t tex_width = texture && texture->width ? texture->width : 1;
-    const uint32_t tex_height = texture && texture->height ? texture->height : 1;
 
 #ifndef GFX_W_PREMULT
     const bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
@@ -1718,30 +1690,16 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
         buf_vbo[buf_vbo_len++] = w;
 #endif
 
-        if (use_texture) {
-            float u = (gfx_shift_texcoord(v_arr[i]->u, gfx_texture_tile(texture_index)->shifts) - gfx_texture_tile(texture_index)->uls * 8) / 32.0f;
-            float v = (gfx_shift_texcoord(v_arr[i]->v, gfx_texture_tile(texture_index)->shiftt) - gfx_texture_tile(texture_index)->ult * 8) / 32.0f;
-            if ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT) {
-                // Linear filter adds 0.5f to the coordinates
-                u += 0.5f;
-                v += 0.5f;
-            }
-            if (x360_logo_count < 8 && (rsp.geometry_mode & G_TEXTURE_GEN)) {
-                int vi=(int)(v_arr[i]-rsp.loaded_vertices);
-                if (vi>=0 && vi<MAX_VERTICES && x360_logo_vertex[vi].valid) {
-                    char m[512];
-                    _snprintf(m,sizeof(m)-1,"MK64: B15-LOGO[%u] vertex=%d normal=%d,%d,%d lookX=%.3f,%.3f,%.3f lookY=%.3f,%.3f,%.3f dot=%.3f,%.3f scale=%04X,%04X linear=%u generated=%.3f,%.3f gpu=%.5f,%.5f tex=%u,%u tile=%u\n",
-                        x360_logo_count++,vi,x360_logo_vertex[vi].normal[0],x360_logo_vertex[vi].normal[1],x360_logo_vertex[vi].normal[2],
-                        rsp.current_lookat_coeffs[0][0],rsp.current_lookat_coeffs[0][1],rsp.current_lookat_coeffs[0][2],
-                        rsp.current_lookat_coeffs[1][0],rsp.current_lookat_coeffs[1][1],rsp.current_lookat_coeffs[1][2],
-                        x360_logo_vertex[vi].dot[0],x360_logo_vertex[vi].dot[1],rsp.texture_scaling_factor.s,rsp.texture_scaling_factor.t,
-                        (rsp.geometry_mode & G_TEXTURE_GEN_LINEAR)!=0,v_arr[i]->u,v_arr[i]->v,u/tex_width,v/tex_height,
-                        (unsigned)tex_width,(unsigned)tex_height,rdp.render_tile);
-                    m[sizeof(m)-1]=0; x360_log(m); x360_logo_vertex[vi].valid=0;
-                }
-            }
-            buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(u / tex_width);
-            buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(v / tex_height);
+        for(int unit=0;unit<2;++unit)if(used_textures[unit]) {
+            const struct TextureHashmapNode *texture=rendering_state.textures[unit];
+            const struct X360TextureTile *tile=gfx_texture_tile(unit);
+            const float width=texture&&texture->width?(float)texture->width:1.0f;
+            const float height=texture&&texture->height?(float)texture->height:1.0f;
+            float u=(gfx_shift_texcoord(v_arr[i]->u,tile->shifts)-tile->uls*8)/32.0f;
+            float v=(gfx_shift_texcoord(v_arr[i]->v,tile->shiftt)-tile->ult*8)/32.0f;
+            if(linear_filter){u+=0.5f;v+=0.5f;}
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(u/width);
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(v/height);
         }
 
         if (use_fog) {
@@ -1753,62 +1711,19 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
             buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_CONVERT(v_arr[i]->color.a)); // fog factor (not alpha)
         }
 
-        for (int j = 0; j < num_inputs; j++) {
-            const struct RGBA *color;
-            struct RGBA tmp;
-            for (int k = 0; k < 1 + (use_alpha ? 1 : 0); k++) {
-                switch (comb->shader_input_mapping[k][j]) {
-                    case CC_PRIM:
-                        color = &rdp.prim_color;
-                        break;
-                    case CC_SHADE:
-                        color = &v_arr[i]->color;
-                        break;
-                    case CC_ENV:
-                        color = &rdp.env_color;
-                        break;
-                    case CC_PRIMA:
-                        tmp.r = tmp.g = tmp.b = tmp.a = rdp.prim_color.a;
-                        color = &tmp;
-                        break;
-                    case CC_ONE:
-                        tmp.r = tmp.g = tmp.b = tmp.a = 255;
-                        color = &tmp;
-                        break;
-                    case CC_LOD:
-                    {
-                        float distance_frac = (v1->w - 3000.0f) / 3000.0f;
-                        if (distance_frac < 0.0f) distance_frac = 0.0f;
-                        if (distance_frac > 1.0f) distance_frac = 1.0f;
-                        tmp.r = tmp.g = tmp.b = tmp.a = distance_frac * 255.0f;
-                        color = &tmp;
-                        break;
-                    }
-                    default:
-                        memset(&tmp, 0, sizeof(tmp));
-                        color = &tmp;
-                        break;
-                }
-                if (k == 0) {
-                    buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_CONVERT(color->r));
-                    buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_CONVERT(color->g));
-                    buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_CONVERT(color->b));
-                } else {
-                    if (use_fog && color == &v_arr[i]->color) {
-                        // Shade alpha is 100% for fog
-                        buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_ONE);
-                    } else {
-                        buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(GFX_COLOR_CONVERT(color->a));
-                    }
-                }
-            }
+        for(int j=0;j<num_inputs;++j){
+            struct RGBA color;
+            if(j==0)color=rdp.prim_color;
+            else if(j==1){color=v_arr[i]->color;if(rsp.geometry_mode&G_FOG)color.a=255;}
+            else if(j==2)color=rdp.env_color;
+            else {float lod=(v_arr[i]->w-3000.0f)/3000.0f;if(lod<0)lod=0;if(lod>1)lod=1;color.r=(uint8_t)(lod*255);color.g=rdp.prim_lod_fraction;color.b=color.a=0;}
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(GFX_COLOR_CONVERT(color.r));
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(GFX_COLOR_CONVERT(color.g));
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(GFX_COLOR_CONVERT(color.b));
+            buf_vbo[buf_vbo_len++]=GFX_OUT_PROP(GFX_COLOR_CONVERT(color.a));
         }
-        /*struct RGBA *color = &v_arr[i]->color;
-        buf_vbo[buf_vbo_len++] = color->r / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->g / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->b / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->a / 255.0f;*/
     }
+
     if (++buf_vbo_num_tris == MAX_BUFFERED) {
         gfx_flush();
     }
@@ -1840,7 +1755,7 @@ static inline bool gfx_clip_triangle(struct LoadedVertex *v1, struct LoadedVerte
 
     const uint8_t clip_or = v1->clip_rej | v2->clip_rej | v3->clip_rej;
 
-    if (!clip_or && clip_and) return false; // triangle fully in frustum
+    if (!clip_or) return false; // triangle fully in frustum
 
     struct LoadedVertex v_buf[2][12] = { { *v1, *v2, *v3 } };
     int v_num[2] = { 3, 0 };
@@ -1861,8 +1776,8 @@ static inline bool gfx_clip_triangle(struct LoadedVertex *v1, struct LoadedVerte
             const struct LoadedVertex *vnext = &v_in[(i + 1) % num_verts];
             const float d1 = plane[0] * vthis->x + plane[1] * vthis->y + plane[2] * vthis->z + vthis->w;
             const float d2 = plane[0] * vnext->x + plane[1] * vnext->y + plane[2] * vnext->z + vnext->w;
-            const bool this_in = d1 > 0.0f;
-            const bool next_in = d2 > 0.0f;
+            const bool this_in = d1 >= 0.0f;
+            const bool next_in = d2 >= 0.0f;
             // current is inside clipping plane, push it into output
             if (this_in) v_out[v_num[outidx]++] = *vthis;
             // one of the vertices is outside, clip the edge and push intersection
@@ -2077,6 +1992,7 @@ static void gfx_dp_set_scissor(uint32_t mode, uint32_t ulx, uint32_t uly, uint32
     float y = (SCREEN_HEIGHT - lry / 4.0f) * ratio_y;
     float width = (lrx - ulx) / 4.0f * ratio_x;
     float height = (lry - uly) / 4.0f * ratio_y;
+
 
     if (x360_scissor_log_count < 8) {
         char message[224];
@@ -2394,44 +2310,24 @@ static void gfx_dp_load_tile(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t 
 
 
 static uint8_t color_comb_component(uint32_t v) {
-    switch (v) {
-        case G_CCMUX_TEXEL0:
-            return CC_TEXEL0;
-        case G_CCMUX_TEXEL1:
-            return CC_TEXEL1;
-        case G_CCMUX_PRIMITIVE:
-            return CC_PRIM;
-        case G_CCMUX_SHADE:
-            return CC_SHADE;
-        case G_CCMUX_ENVIRONMENT:
-            return CC_ENV;
-        case G_CCMUX_TEXEL0_ALPHA:
-            return CC_TEXEL0A;
-        case G_CCMUX_LOD_FRACTION:
-            return CC_LOD;
-        default:
-            return CC_0;
-    }
+    switch(v){case 0:return CC_COMBINED;case 1:return CC_TEXEL0;case 2:return CC_TEXEL1;
+    case 3:return CC_PRIM;case 4:return CC_SHADE;case 5:return CC_ENV;default:return CC_0;}
 }
-
-/* B12: mux 6 means ONE in RGB A/D and alpha A/B/D, but not in C.
- * Keep channel/slot decoding separate: alpha C=6 is PRIM_LOD_FRAC. */
-static inline uint32_t color_comb(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
-    return (a == G_CCMUX_1 ? CC_ONE : color_comb_component(a)) |
-           (color_comb_component(b) << 4) |
-           ((c == G_CCMUX_PRIMITIVE_ALPHA ? CC_PRIMA : color_comb_component(c)) << 8) |
-           ((d == G_CCMUX_1 ? CC_ONE : color_comb_component(d)) << 12);
+static uint8_t color_mul_component(uint32_t v){
+    switch(v){case 7:return CC_COMBINEDA;case 8:return CC_TEXEL0A;case 9:return CC_TEXEL1A;
+    case 10:return CC_PRIMA;case 11:return CC_SHADEA;case 12:return CC_ENVA;
+    case 13:return CC_LOD;case 14:return CC_PRIMLOD;default:return color_comb_component(v);}
 }
-
-static inline uint32_t alpha_comb(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
-    return (a == G_ACMUX_1 ? CC_ONE : color_comb_component(a)) |
-           ((b == G_ACMUX_1 ? CC_ONE : color_comb_component(b)) << 4) |
-           (color_comb_component(c) << 8) |
-           ((d == G_ACMUX_1 ? CC_ONE : color_comb_component(d)) << 12);
+static inline uint32_t color_comb(uint32_t a,uint32_t b,uint32_t c,uint32_t d){
+    return (a==6?CC_ONE:color_comb_component(a))|(color_comb_component(b)<<4)|
+        (color_mul_component(c)<<8)|((d==6?CC_ONE:color_comb_component(d))<<12);
 }
-
-static void gfx_dp_set_combine_mode(uint32_t rgb, uint32_t alpha) {
-    rdp.combine_mode = rgb | (alpha << 16);
+static inline uint32_t alpha_comb(uint32_t a,uint32_t b,uint32_t c,uint32_t d){
+    return (a==6?CC_ONE:color_comb_component(a))|((b==6?CC_ONE:color_comb_component(b))<<4)|
+        ((c==0?CC_LOD:c==6?CC_PRIMLOD:color_comb_component(c))<<8)|((d==6?CC_ONE:color_comb_component(d))<<12);
+}
+static void gfx_dp_set_combine_mode(uint32_t rgb,uint32_t alpha){
+    uint64_t stage=rgb|(alpha<<16);rdp.combine_mode=stage|(stage<<32);
 }
 
 static void gfx_dp_set_env_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -2468,7 +2364,7 @@ static void gfx_dp_set_fill_color(uint32_t packed_color) {
     rdp.fill_color.a = a * 255;
 }
 
-static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry) {
+static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, bool textured) {
     uint32_t saved_other_mode_h = rdp.other_mode_h;
     uint32_t cycle_type = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE));
 
@@ -2486,8 +2382,31 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     ulyf = -(ulyf / (4.0f * HALF_SCREEN_HEIGHT)) + 1.0f;
     lrxf = lrxf / (4.0f * HALF_SCREEN_WIDTH) - 1.0f;
     lryf = -(lryf / (4.0f * HALF_SCREEN_HEIGHT)) + 1.0f;
-    ulxf = gfx_adjust_x_for_aspect_ratio(ulxf);
-    lrxf = gfx_adjust_x_for_aspect_ratio(lrxf);
+    mkview::Rect source;
+    const bool local=x360_net_active() && gGamestate==4 &&
+        gPlayerCountSelection1==x360_net_player_count() &&
+        mkview::crop(gActiveScreenMode,x360_net_player_count(),x360_net_local_slot(),source);
+
+    if (local) {
+        if (textured) {
+            mkview::hud_rect(
+                ulxf, ulyf, lrxf, lryf, source,
+                mkview::output(x360_legacy_wide_display()));
+        }
+        /*
+         * Preserve the current local online-race fill behavior: clears/fades
+         * cover the selected local scissor and are handled by the local-view
+         * presentation path.
+         */
+    } else {
+        /*
+         * PRE-DISPLAY-OPTION BEHAVIOR:
+         * normal/offline textured AND fill rectangles use the same X aspect.
+         * This is required for MK64 menu panels to stay aligned.
+         */
+        ulxf = gfx_adjust_x_for_aspect_ratio(ulxf);
+        lrxf = gfx_adjust_x_for_aspect_ratio(lrxf);
+    }
 
     struct LoadedVertex* ul = &rsp.loaded_vertices[MAX_VERTICES + 0];
     struct LoadedVertex* ll = &rsp.loaded_vertices[MAX_VERTICES + 1];
@@ -2514,6 +2433,14 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     ur->z = -1.0f;
     ur->w = 1.0f;
 
+    for (int i=0;i<4;++i) {
+        LoadedVertex *v=&rsp.loaded_vertices[MAX_VERTICES+i];
+        v->clip_rej=0;
+        if(v->x < -v->w)v->clip_rej|=CLIP_LEFT;
+        if(v->x >  v->w)v->clip_rej|=CLIP_RIGHT;
+        if(v->y < -v->w)v->clip_rej|=CLIP_BOTTOM;
+        if(v->y >  v->w)v->clip_rej|=CLIP_TOP;
+    }
     // The coordinates for texture rectangle shall bypass the viewport setting
     struct XYWidthHeight default_viewport = {0, 0, gfx_current_dimensions.width, gfx_current_dimensions.height};
     struct XYWidthHeight viewport_saved = rdp.viewport;
@@ -2540,14 +2467,14 @@ static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
     rdp.render_tile = tile & 7;
     if (rdp.render_tile != saved_render_tile)
         rdp.textures_changed[0] = rdp.textures_changed[1] = true;
-    uint32_t saved_combine_mode = rdp.combine_mode;
+    uint64_t saved_combine_mode = rdp.combine_mode;
     if ((rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_COPY) {
         // Per RDP Command Summary Set Tile's shift s and this dsdx should be set to 4 texels
         // Divide by 4 to get 1 instead
         dsdx >>= 2;
 
         // Color combiner is turned off in copy mode
-        gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_TEXEL0), color_comb(0, 0, 0, G_ACMUX_TEXEL0));
+        gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_TEXEL0), alpha_comb(7, 7, 7, G_ACMUX_TEXEL0));
 
         // Per documentation one extra pixel is added in this modes to each edge
         lrx += 1 << 2;
@@ -2602,7 +2529,7 @@ static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
             ur->u = uls;
             ur->v = lrt;
         }
-        gfx_draw_rectangle(ulx, uly, lrx, lry);
+        gfx_draw_rectangle(ulx, uly, lrx, lry, true);
     }
 
     rdp.combine_mode = saved_combine_mode;
@@ -2624,8 +2551,8 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
         lry += 1 << 2;
     }
 
-    const uint32_t saved_combine_mode = rdp.combine_mode;
-    gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_SHADE), color_comb(0, 0, 0, G_ACMUX_SHADE));
+    const uint64_t saved_combine_mode = rdp.combine_mode;
+    gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_SHADE), alpha_comb(7, 7, 7, G_ACMUX_SHADE));
 
     if (gfx_rapi->fill_rect) {
         float ulxf = ulx * ratio_x;
@@ -2643,7 +2570,7 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
             struct LoadedVertex* v = &rsp.loaded_vertices[i];
             v->color = rdp.fill_color;
         }
-        gfx_draw_rectangle(ulx, uly, lrx, lry);
+        gfx_draw_rectangle(ulx, uly, lrx, lry, false);
     }
 
     rdp.combine_mode = saved_combine_mode;
@@ -3274,6 +3201,7 @@ static void gfx_run_dl(Gfx* cmd) {
                 gfx_dp_set_env_color(C1(24, 8), C1(16, 8), C1(8, 8), C1(0, 8));
                 break;
             case G_SETPRIMCOLOR:
+                rdp.prim_lod_fraction=C0(0,8);
                 gfx_dp_set_prim_color(C1(24, 8), C1(16, 8), C1(8, 8), C1(0, 8));
                 break;
             case G_SETFOGCOLOR:
@@ -3283,11 +3211,10 @@ static void gfx_run_dl(Gfx* cmd) {
                 gfx_dp_set_fill_color(cmd->words.w1);
                 break;
             case G_SETCOMBINE:
-                gfx_dp_set_combine_mode(
-                    color_comb(C0(20, 4), C1(28, 4), C0(15, 5), C1(15, 3)),
-                    alpha_comb(C0(12, 3), C1(12, 3), C0(9, 3), C1(9, 3)));
-                    /*color_comb(C0(5, 4), C1(24, 4), C0(0, 5), C1(6, 3)),
-                    color_comb(C1(21, 3), C1(3, 3), C1(18, 3), C1(0, 3)));*/
+                rdp.combine_mode=(uint64_t)(color_comb(C0(20,4),C1(28,4),C0(15,5),C1(15,3))|
+                    (alpha_comb(C0(12,3),C1(12,3),C0(9,3),C1(9,3))<<16))|
+                    ((uint64_t)(color_comb(C0(5,4),C1(24,4),C0(0,5),C1(6,3))|
+                    (alpha_comb(C1(21,3),C1(3,3),C1(18,3),C1(0,3))<<16))<<32);
                 break;
             // G_SETPRIMCOLOR, G_CCMUX_PRIMITIVE, G_ACMUX_PRIMITIVE, is used by Goddard
             // G_CCMUX_TEXEL1, LOD_FRACTION is used in Bowser room 1

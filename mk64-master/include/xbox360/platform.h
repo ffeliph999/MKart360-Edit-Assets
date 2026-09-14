@@ -33,6 +33,8 @@ void x360_exec_sp_task(struct SPTask *task);
 
 /* Audio backend / HLE boundary. */
 int  x360_audio_init(void);
+int  x360_audio_set_frequency(unsigned rate);
+int  x360_audio_generation_size(int nominal,unsigned queued,int minimum,int maximum);
 int  x360_audio_buffered_samples(void);
 int  x360_audio_desired_samples(void);
 void x360_audio_submit_pcm(const void *pcm, unsigned bytes);

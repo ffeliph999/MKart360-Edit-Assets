@@ -22,7 +22,7 @@ extern "C" int x360_platform_init(void) {
     pp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     pp.EnableAutoDepthStencil = TRUE;
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
-    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
 
     g_d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!g_d3d) return 0;
@@ -55,7 +55,7 @@ extern "C" void x360_present_and_pace(void) {
     }
     LARGE_INTEGER now;QueryPerformanceCounter(&now);
     LONGLONG frame=g_clock_frequency.QuadPart/30;
-    if(!g_next_tick || now.QuadPart-g_next_tick>frame*4)g_next_tick=now.QuadPart;
+    if(!g_next_tick || now.QuadPart-g_next_tick>frame)g_next_tick=now.QuadPart;
     g_next_tick+=frame;
     while(now.QuadPart<g_next_tick){Sleep(1);QueryPerformanceCounter(&now);}
 }

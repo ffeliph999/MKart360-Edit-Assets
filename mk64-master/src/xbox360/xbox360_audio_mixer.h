@@ -45,6 +45,7 @@ static struct {
 } rspa;
 
 /* B19.4R6 audio telemetry. These counters do not alter mixer behavior. */
+static bool x360_mixer_diagnostics;
 static unsigned x360_r6_book_bytes_max;
 static unsigned x360_r6_book_loaded_bytes;
 static unsigned x360_r6_book_clamps;
@@ -328,21 +329,28 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb,
     uint16_t rate_wet = rspa.rate_wet;
 
     do {
+        if(x360_mixer_diagnostics){
         if (vols[0] < x360_r6_env_vol_l_min) x360_r6_env_vol_l_min = vols[0];
         if (vols[0] > x360_r6_env_vol_l_max) x360_r6_env_vol_l_max = vols[0];
         if (vols[1] < x360_r6_env_vol_r_min) x360_r6_env_vol_r_min = vols[1];
         if (vols[1] > x360_r6_env_vol_r_max) x360_r6_env_vol_r_max = vols[1];
 
+        }
+
         for (int i = 0; i < 8; i++) {
             const int16_t source = *in++;
+            if(x360_mixer_diagnostics){
             unsigned source_mag = x360_r6_abs16((int)source);
             if (source_mag > x360_r6_env_in_peak)
                 x360_r6_env_in_peak = source_mag;
+
+            }
 
             int16_t samples[2] = {source, source};
             for (int j = 0; j < 2; j++) {
                 samples[j] = (samples[j] * vols[j] >> 16) ^ negs[j];
 
+                if(x360_mixer_diagnostics){
                 unsigned dry_mag = x360_r6_abs16((int)samples[j]);
                 if (j == 0) {
                     if (dry_mag > x360_r6_env_left_peak) x360_r6_env_left_peak = dry_mag;
@@ -350,11 +358,16 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb,
                     if (dry_mag > x360_r6_env_right_peak) x360_r6_env_right_peak = dry_mag;
                 }
 
+                }
+
                 *dry[j] = clamp16(*dry[j] + samples[j]); dry[j]++;
 
                 int wet_sample = (samples[swapped[j]] * vol_wet) >> 16;
+                if(x360_mixer_diagnostics){
                 unsigned wet_mag = x360_r6_abs16(wet_sample);
                 if (wet_mag > x360_r6_env_wet_peak) x360_r6_env_wet_peak = wet_mag;
+                }
+
                 *wet[j] = clamp16(*wet[j] + wet_sample); wet[j]++;
             }
         }

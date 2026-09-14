@@ -11,6 +11,26 @@ inline bool crop(int mode,int players,int slot,Rect &r){
     else return false;
     return true;
 }
+inline Rect output(bool widescreen) {
+    Rect r={widescreen?0:160,0,widescreen?1280:960,720};return r;
+}
+inline Rect output_rect(Rect r,Rect out) {
+    int right=out.x+(r.x+r.w)*out.w/1280;
+    int bottom=out.y+(r.y+r.h)*out.h/720;
+    r.x=out.x+r.x*out.w/1280;r.y=out.y+r.y*out.h/720;
+    r.w=right-r.x;r.h=bottom-r.y;return r;
+}
+/* Rectangles are still intact here, before clipping can create triangle fans.
+ * Preserve each HUD anchor and fit its native pixels uniformly to the output. */
+inline void hud_rect(float &left,float &top,float &right,float &bottom,
+                     Rect source,Rect out) {
+    const float sx=float(out.w)/(float(source.w)/4.0f);
+    const float sy=float(out.h)/(float(source.h)/3.0f);
+    const float ux=sx>sy?sy/sx:1.0f,uy=sy>sx?sx/sy:1.0f;
+    const float cx=(left+right)*0.5f,cy=(top+bottom)*0.5f;
+    left=cx+(left-cx)*ux;right=cx+(right-cx)*ux;
+    top=cy+(top-cy)*uy;bottom=cy+(bottom-cy)*uy;
+}
 inline bool intersect(Rect a,Rect b,Rect &r){
     r.x=a.x>b.x?a.x:b.x;r.y=a.y>b.y?a.y:b.y;
     int right=a.x+a.w<b.x+b.w?a.x+a.w:b.x+b.w;

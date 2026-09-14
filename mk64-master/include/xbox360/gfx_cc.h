@@ -14,7 +14,7 @@ enum {
     CC_TEXEL0A,
     CC_LOD,
     CC_ONE,
-    CC_PRIMA
+    CC_PRIMA, CC_COMBINED, CC_COMBINEDA, CC_TEXEL1A, CC_SHADEA, CC_ENVA, CC_PRIMLOD
 };
 
 enum {
@@ -32,9 +32,12 @@ enum {
 #define SHADER_OPT_FOG (1 << 25)
 #define SHADER_OPT_TEXTURE_EDGE (1 << 26)
 #define SHADER_OPT_NOISE (1 << 27)
+#define SHADER_OPT_2CYCLE (1 << 28)
 
 struct CCFeatures {
     uint8_t c[2][4];
+    uint8_t c2[2][4];
+    bool two_cycle;
     bool opt_alpha;
     bool opt_fog;
     bool opt_texture_edge;
@@ -51,6 +54,7 @@ struct CCFeatures {
 extern "C" {
 #endif
 
+uint32_t gfx_cc_register(uint64_t combine,uint32_t options);
 void gfx_cc_get_features(uint32_t shader_id, struct CCFeatures *cc_features);
 
 #ifdef __cplusplus

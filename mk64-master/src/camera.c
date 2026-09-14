@@ -6,6 +6,9 @@
 #include <mk64.h>
 
 #include "camera.h"
+#ifdef XBOX360_PORT
+#include "xbox360/netplay.h"
+#endif
 #include "code_800029B0.h"
 #include "math_util.h"
 #include "racing/memory.h"
@@ -51,9 +54,19 @@ f32 D_80164AA0[4];
 extern f32 D_80164498[];
 extern s16 D_80164678[];
 
+/* Camera distance and recovery smoothing use 1P tuning for all online slots.
+ * The game screen mode itself remains multiplayer for physics and input. */
+static s32 camera_view_mode(void) {
+#ifdef XBOX360_PORT
+    if (x360_net_active()) return SCREEN_MODE_1P;
+#endif
+    return gActiveScreenMode;
+}
+
 void camera_init(f32 posX, f32 posY, f32 posZ, UNUSED s16 rot, u32 arg4, s32 cameraId) {
     Player* player = gPlayerOne;
     Camera* camera = &cameras[cameraId];
+    s32 viewMode = camera_view_mode();
 
     D_80152300[cameraId] = arg4;
     switch (arg4) {
@@ -88,7 +101,7 @@ void camera_init(f32 posX, f32 posY, f32 posZ, UNUSED s16 rot, u32 arg4, s32 cam
 
             D_80164A90[cameraId] = 0.0f;
             D_80164AA0[cameraId] = 0.0f;
-            D_80164A78[cameraId] = D_800DDB30[gActiveScreenMode];
+            D_80164A78[cameraId] = D_800DDB30[viewMode];
             D_80164A18[cameraId] = 0;
             D_80164A08[cameraId] = 0;
             D_80164498[cameraId] = 0.0f;
@@ -98,7 +111,7 @@ void camera_init(f32 posX, f32 posY, f32 posZ, UNUSED s16 rot, u32 arg4, s32 cam
             player += cameraId;
             camera->unk_2C = player->rotation[1];
             camera->unk_AC = player->rotation[1];
-            switch (gActiveScreenMode) {
+            switch (viewMode) {
                 case SCREEN_MODE_1P:
                 case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
                     if (gModeSelection == BATTLE) {
@@ -326,12 +339,12 @@ void func_8001CCEC(Player* player, Camera* camera, Vec3f arg2, f32* arg3, f32* a
         move_f32_towards(&D_80164A38[index], 0, 0.1f);
         move_f32_towards(&D_80164A48[index], 0, 0.1f);
         D_80164A78[index] -= 0.1;
-        if (D_800DDB30[gActiveScreenMode] >= D_80164A78[index]) {
-            D_80164A78[index] = D_800DDB30[gActiveScreenMode];
+        if (D_800DDB30[camera_view_mode()] >= D_80164A78[index]) {
+            D_80164A78[index] = D_800DDB30[camera_view_mode()];
         }
     }
     if ((player->lakituProps & WENT_OVER_OOB) == WENT_OVER_OOB) {
-        switch (gActiveScreenMode) {
+        switch (camera_view_mode()) {
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
             case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
             case SCREEN_MODE_3P_4P_SPLITSCREEN:
@@ -560,8 +573,8 @@ void func_8001D944(Player* player, Camera* camera, Vec3f arg2, f32* arg3, f32* a
         move_f32_towards(&D_80164A38[index], 0, 0.1f);
         move_f32_towards(&D_80164A48[index], 0, 0.1f);
         D_80164A78[index] -= 0.1;
-        if (D_800DDB30[gActiveScreenMode] >= D_80164A78[index]) {
-            D_80164A78[index] = D_800DDB30[gActiveScreenMode];
+        if (D_800DDB30[camera_view_mode()] >= D_80164A78[index]) {
+            D_80164A78[index] = D_800DDB30[camera_view_mode()];
         }
     }
     if ((player->lakituProps & WENT_OVER_OOB) == WENT_OVER_OOB) {

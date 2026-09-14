@@ -1,13 +1,12 @@
 {
-  "include/xbox360/netplay.h": "6271b7661b87ca2b003f99fec39d4ab61d7f60fc8ee3c04092b385805679cbd5",
-  "include/xbox360/netplay_protocol.h": "04066a957a0be3d3fd450ee7d87c4f5b5b3beadbd690ad01a37389a41f3385d7",
+  "include/xbox360/netplay.h": "7c490690fb6b981eed3a1a04af87c9d1a4b208f96047b7ebecc9bd0a82ebe89c",
+  "include/xbox360/netplay_protocol.h": "2ed4a80b3409d2cbee97d8aa0bcb3f12d44a3d8ae5aaaa1bab3d89bd84f55ca8",
   "src/audio/external.c": "ac18a624cecc60c1aaa39038c11ce708eda57b9be8a38aa506d022986787d9d3",
   "src/main.c": "647e97f3107fd08eb2c759830f36f21e7f7058d8983cfbb565a82731ac822f47",
   "src/racing/memory.c": "3550ccf72cdc6c382c8a45a7227457cd10074449ad96e59b8850f5b44c9217d7",
   "src/xbox360/xbox360_asset_loader.cpp": "1d21071ae526bc287f27097f68d211d082c3d9c21b5ea64d46be207384d478c8",
-  "src/xbox360/xbox360_netplay.cpp": "1c4253f303f98a7b7cfe93468d672f3718d363d434af4b37b3215ccd543f6287",
-  "src/xbox360/xbox360_renderer.cpp": "ac11f947158ae4137210be0668c9904956ef59e1ceafdfa2af49b71c852e5a6c",
+  "src/xbox360/xbox360_netplay.cpp": "bd610081bacd35a41f21637edfa241711ba3c4c8bc907ca733b4988a2de63971",
+  "src/xbox360/xbox360_renderer.cpp": "63b37bb2a3e4021ee8c46febb3ad6a971da3137b04ba8efbb124e21f7f97509c",
   "src/xbox360/xbox360_save_input.cpp": "596242adf2a33fe81fd682e355301a55452c44d4bd51b0023194a058221631db",
-  "include/xbox360/netplay_view.h": "c7e8bad5422811e6ab52688d2012f6453c7cb3ae71a25cc5af160aece1e3baa1"
+  "include/xbox360/netplay_view.h": "d9784aa1c7fe1f3ed2b5d640a0a37e6f3768e392cff5db86a5ccfb54b7a1dfdd"
 }
- 

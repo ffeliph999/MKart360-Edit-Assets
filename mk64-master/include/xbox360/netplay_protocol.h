@@ -4,7 +4,7 @@
 #include <string.h>
 
 /*
- * MK64 Xbox 360 netplay protocol v2
+ * MK64 Xbox 360 netplay protocol v3
  *
  * Topology:
  *   P1 = host
@@ -19,11 +19,13 @@
 namespace mknet {
 
 enum {
-    VERSION=2,
-    BUILD=0xB2200402,
+    VERSION=3,
+    BUILD=0xB2400915,
+    /* MK64_V3_2P_4P_EARLY_RELAY_LOW_LATENCY */
     HEADER=28,
     HISTORY=256,
     REDUNDANCY=24,
+    MAX_DELAY=12,
     MAX_PLAYERS=4,
     MAX_PACKET=512
 };
@@ -69,7 +71,7 @@ inline int header(uint8_t *p,Type t,const uint8_t session[16],int payload) {
     p[5]=uint8_t(t);
     p[6]=uint8_t((HEADER+payload)>>8);
     p[7]=uint8_t(HEADER+payload);
-    put32(p+8,BUILD);
+    put32(p+8,uint32_t(BUILD));
     memcpy(p+12,session,16);
     return HEADER+payload;
 }
@@ -89,7 +91,7 @@ inline bool valid(const uint8_t *p,int n) {
     case READY:
         return payload==24 && q[20]>=1 && q[20]<MAX_PLAYERS;
     case START:
-        return payload==4 && q[0]>=2 && q[0]<=8 &&
+        return payload==4 && q[0]>=2 && q[0]<=MAX_DELAY &&
                q[1]>=2 && q[1]<=MAX_PLAYERS &&
                q[2]>=1 && q[2]<q[1];
     case START_ACK:
@@ -97,7 +99,9 @@ inline bool valid(const uint8_t *p,int n) {
     case CLIENT_INPUT: {
         if(payload<20)return false;
         unsigned slot=q[0],count=q[1];
-        return slot>=1&&slot<MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
+        /* Slot 0 is valid in 2P when the host sends its early input
+         * directly to the guest. */
+        return slot<MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
                payload==16+4*int(count);
     }
     case FRAMESET: {
@@ -123,6 +127,40 @@ struct BootBarrier {
     bool all_ready() const{return players>=2&&players<=MAX_PLAYERS&&mask==((1U<<players)-1);}
 };
 
+/* Integer EWMA and variation; do not size the buffer from the luckiest ping. */
+struct Latency {
+    unsigned mean,variation,samples;
+    void add(unsigned ms) {
+        /* A first RTT sample tells us the mean, but not the jitter. Treating
+         * half the RTT as initial variation made the first budget ~= 3x RTT. */
+        if(!samples){mean=ms;variation=0;samples=1;return;}
+        unsigned delta=ms>mean?ms-mean:mean-ms;
+        variation=(3*variation+delta+2)/4;
+        mean=(7*mean+ms+4)/8;
+        if(samples<0xFFFFU)++samples;
+    }
+    unsigned budget() const {return mean+4*variation;}
+};
+inline unsigned input_delay(unsigned budget_ms) {
+    /* 3P/4P keep the conservative host-relay budget. */
+    unsigned d=(budget_ms*30+999)/1000+2;
+    return d<2?2:d>MAX_DELAY?MAX_DELAY:d;
+}
+inline unsigned input_delay_2p(unsigned budget_ms) {
+    /* Direct host->guest early input means one WAN crossing is on the
+     * critical path. Convert roughly one-way RTT to 30 Hz frames and keep
+     * one extra safety frame. */
+    unsigned d=(budget_ms*30+1999)/2000+1;
+    return d<2?2:d>MAX_DELAY?MAX_DELAY:d;
+}
+inline unsigned input_delay_early_relay(unsigned worst_ms,unsigned second_ms) {
+    /* With 3P/4P early relay, the longest guest-to-guest path is approximately
+     * guest A -> host -> guest B: half of each peer's host RTT budget. */
+    unsigned path_ms=(worst_ms+second_ms+1)/2;
+    unsigned d=(path_ms*30+999)/1000+1;
+    return d<2?2:d>MAX_DELAY?MAX_DELAY:d;
+}
+
 struct InputSlot {
     uint32_t frame;
     Pad pad;
@@ -139,12 +177,13 @@ struct Stream4 {
     HashSlot hashes[HISTORY];
     HashSlot peer_hashes[MAX_PLAYERS][HISTORY];
     uint32_t frame,latest_local,latest_complete;
+    uint32_t peer_frame[MAX_PLAYERS];
     unsigned delay,players,local_slot;
     bool fault;
 
     void reset(unsigned d,unsigned p,unsigned slot) {
         memset(this,0,sizeof(*this));
-        if(d<2||d>8||p<2||p>MAX_PLAYERS||slot>=p){fault=true;return;}
+        if(d<2||d>MAX_DELAY||p<2||p>MAX_PLAYERS||slot>=p){fault=true;return;}
         delay=d;
         players=p;
         local_slot=slot;
@@ -207,9 +246,15 @@ struct Stream4 {
         }
     }
 
-    int client_packet(uint8_t *p,const uint8_t session[16]) {
+    int client_packet(uint8_t *p,const uint8_t session[16],unsigned target_slot=0) {
+        if(fault||target_slot>=players||target_slot==local_slot)return 0;
         uint32_t first=latest_local>=REDUNDANCY-1?latest_local-(REDUNDANCY-1):0;
+        /* A peer's frame is the next input it needs, not a receipt timestamp.
+         * Replay from that frame when a gap falls outside the usual tail. */
+        if(peer_frame[target_slot]<first)first=peer_frame[target_slot];
+        if(latest_local-first>=HISTORY){fault=true;return 0;}
         unsigned count=latest_local-first+1;
+        if(count>REDUNDANCY)count=REDUNDANCY;
         int n=header(p,CLIENT_INPUT,session,16+count*4);
         uint8_t *q=p+HEADER;
         q[0]=uint8_t(local_slot);
@@ -227,19 +272,21 @@ struct Stream4 {
         return n;
     }
 
-    bool receive_client(unsigned expected_slot,const uint8_t *p,int n) {
-        if(fault||local_slot!=0||expected_slot==0||expected_slot>=players)return false;
+    bool receive_remote(unsigned expected_slot,const uint8_t *p,int n) {
+        /* Host receives guest input as before. In 2P the guest also accepts
+         * slot 0 directly, avoiding the guest->host->guest relay path. */
+        if(fault||expected_slot>=players||expected_slot==local_slot)return false;
         if(!valid(p,n)||p[5]!=CLIENT_INPUT)return false;
         const uint8_t *q=p+HEADER;
         if(q[0]!=expected_slot)return false;
 
         unsigned count=q[1];
         uint32_t first=get32(q+4),hf=get32(q+8);
-        if(first>0x7FFFFF00U||hf>frame+delay+REDUNDANCY)return false;
+        if(first>0x7FFFFF00U||hf>frame+HISTORY-1||first+count-1>frame+delay+REDUNDANCY)return false;
 
         for(unsigned i=0;i<count;++i) {
             uint32_t f=first+i;
-            if(f+HISTORY<=frame||f>frame+delay+REDUNDANCY)continue;
+            if(f<frame||f>frame+delay+REDUNDANCY)continue;
             InputSlot &s=inputs[expected_slot][f%HISTORY];
             Pad a=decode_pad(q+16+i*4);
             if(s.present&&s.frame==f&&!equal(s.pad,a)){fault=true;return false;}
@@ -248,18 +295,23 @@ struct Stream4 {
 
         if(q[2]&&hf+HISTORY>frame) {
             HashSlot &h=peer_hashes[expected_slot][hf%HISTORY];
-            h.frame=hf;h.value=get32(q+12);h.present=true;
+            if(!h.present||hf>=h.frame){h.frame=hf;h.value=get32(q+12);h.present=true;}
             if(!local_hash_matches(expected_slot,hf))fault=true;
         }
 
+        if(hf>peer_frame[expected_slot])peer_frame[expected_slot]=hf;
         update_complete();
         return !fault;
     }
 
-    int frameset_packet(uint8_t *p,const uint8_t session[16]) {
+    int frameset_packet(uint8_t *p,const uint8_t session[16],unsigned target_slot=1) {
         update_complete();
         uint32_t first=latest_complete>=REDUNDANCY-1?latest_complete-(REDUNDANCY-1):0;
+        if(target_slot==0||target_slot>=players)return 0;
+        if(peer_frame[target_slot]<first)first=peer_frame[target_slot];
+        if(latest_complete-first>=HISTORY){fault=true;return 0;}
         unsigned count=latest_complete-first+1;
+        if(count>REDUNDANCY)count=REDUNDANCY;
         int n=header(p,FRAMESET,session,16+count*players*4);
         uint8_t *q=p+HEADER;
         q[0]=uint8_t(players);
@@ -290,14 +342,14 @@ struct Stream4 {
 
         unsigned count=q[1];
         uint32_t first=get32(q+4),hf=get32(q+8);
-        if(first>0x7FFFFF00U||hf>frame+delay+REDUNDANCY)return false;
+        if(first>0x7FFFFF00U||hf>frame+HISTORY-1||first+count-1>frame+delay+REDUNDANCY)return false;
 
         const uint8_t *in=q+16;
         for(unsigned i=0;i<count;++i) {
             uint32_t f=first+i;
             for(unsigned s=0;s<players;++s) {
                 Pad a=decode_pad(in);in+=4;
-                if(f+HISTORY<=frame||f>frame+delay+REDUNDANCY)continue;
+                if(f<frame||f>frame+delay+REDUNDANCY)continue;
                 InputSlot &dst=inputs[s][f%HISTORY];
                 if(dst.present&&dst.frame==f&&!equal(dst.pad,a)){fault=true;return false;}
                 dst.present=true;dst.frame=f;dst.pad=a;
@@ -306,9 +358,10 @@ struct Stream4 {
 
         if(q[2]&&hf+HISTORY>frame) {
             HashSlot &h=peer_hashes[0][hf%HISTORY];
-            h.frame=hf;h.value=get32(q+12);h.present=true;
+            if(!h.present||hf>=h.frame){h.frame=hf;h.value=get32(q+12);h.present=true;}
             if(!local_hash_matches(0,hf))fault=true;
         }
+        if(hf>peer_frame[0])peer_frame[0]=hf;
         return !fault;
     }
 
