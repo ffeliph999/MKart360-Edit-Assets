@@ -15,6 +15,12 @@ This version includes Xbox 360 build support, 2-4 player console-to-console mult
 - Controller rebinding/tuning options
 
 
+## Fixed
+
+-audio cut outs
+-effects not rendering properly
+-input delay when playing online
+
 Each network player uses a separate Xbox 360.
 
 WHEN PLAYING ONLINE MAKE SURE ALL LOGGERS ARE TURNED OFF
