@@ -9,34 +9,18 @@ This version includes Xbox 360 build support, 2-4 player console-to-console mult
 - Native Xbox 360 project/source files
 - 2, 3, and 4 player console-to-console multiplayer
 - LAN and direct Internet host/join
-- Xbox LIVE Party-assisted host discovery and join flow
+- Joining games through Party chat invites
 - Per-console fullscreen views for P1/P2/P3/P4
 - 16:9 and centered 4:3 display modes
 - Controller rebinding/tuning options
-- Independent Game / Netplay / Party logging controls
-- Split-screen aspect-ratio correction
-- Sky/background rendering fixes
-- Public asset-generation scripts
+
 
 Each network player uses a separate Xbox 360.
 
-## September 2026 update
-
-The boot menu now includes an **Options** screen with display, controller, and logging settings. Display mode can be switched between **16:9** and centered **4:3** before starting Offline, Host, or Join.
-
-Netplay protocol 3 uses adaptive deterministic input buffering and early input/relay paths to reduce unnecessary host-relay latency for 2-4 player sessions while preserving synchronized simulation. All consoles in the same session must run the same build.
-
-Xbox LIVE Party integration is used as a rendezvous path only. The host can open the normal Party/Friends UI, and a guest who joins the same Party can use the Join screen to discover the MK360 host automatically. Actual gameplay still uses MK360's normal UDP transport on port 6464. Manual IP joining remains available.
-
-Logging is split into three independent options:
-
-- **Game Logging** - normal MK64 diagnostics
-- **Netplay Logging** - writes `mk64-netplay.log`
-- **Party Logging** - writes `mk64-party-host.log`
-
+WHEN PLAYING ONLINE MAKE SURE ALL LOGGERS ARE TURNED OFF
 Only one file logger can be enabled at a time to avoid overlapping synchronous log writes during gameplay. Netplay and Party logging default to off.
 
-The Windows regression suite is in `mk64-master/tests` and covers online slots/aspects, packet validation, desync detection, history wrap, and multi-player loss/jitter/outage simulation. Live Xbox 360 testing has also been used during development of the Party and multiplayer paths.
+
 
 ## What is not included
 
