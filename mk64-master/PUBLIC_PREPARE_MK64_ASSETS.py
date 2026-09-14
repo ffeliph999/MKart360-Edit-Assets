@@ -242,9 +242,25 @@ def verify_gold_source(root, hashes):
     bad=[]
     for rel,expected in hashes.items():
         p=root/rel
-        if not p.is_file(): bad.append(f"missing {rel}"); continue
-        got=sha256(p.read_bytes())
-        if got!=expected: bad.append(f"changed {rel}: {got}")
+        if not p.is_file():
+            bad.append(f"missing {rel}")
+            continue
+
+        data=p.read_bytes()
+        got=sha256(data)
+        if got==expected:
+            continue
+
+        # Git on Windows may check .cpp/text files out as CRLF even when the
+        # public gold hashes were recorded from LF source.  Line-ending style
+        # is not a source-code change, so retry using canonical LF bytes.
+        canonical=data.replace(b"\r\n",b"\n").replace(b"\r",b"\n")
+        canonical_hash=sha256(canonical)
+        if canonical_hash==expected:
+            continue
+
+        bad.append(f"changed {rel}: {got}")
+
     if bad:
         die("working 2-player gold source was changed. Refusing to prepare assets:\n  " + "\n  ".join(bad))
 
