@@ -28,7 +28,12 @@
 // 8 Kart AI Players * 4 real players in coop
 #define MTX_KART_POOL_SIZE 8 * 4
 
+#ifdef XBOX360_PORT
+/* Four camera passes can now draw every racer's particles. */
+#define MTX_EFFECT_POOL_SIZE 2640
+#else
 #define MTX_EFFECT_POOL_SIZE 660
+#endif
 
 // func_80095BD0 sets an OOB pool size max check (760)
 #ifdef AVOID_UB
@@ -37,7 +42,11 @@
 #define MTX_EFFECT_POOL_SIZE_MAX MTX_EFFECT_POOL_SIZE + 100
 #endif
 
+#ifdef XBOX360_PORT
+#define GFX_POOL_SIZE 30000
+#else
 #define GFX_POOL_SIZE 7500
+#endif
 
 struct GfxPool {
     /* 0x00000 */ Mtx mtxScreen;                       // Matrix for skybox and startup logo

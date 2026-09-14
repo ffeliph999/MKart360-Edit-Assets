@@ -1298,7 +1298,7 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                     play_sound2(SOUND_MENU_CURSOR_MOVE);
                 }
 #ifdef XBOX360_PORT
-                if(x360_net_active())gPlayerCount=x360_net_player_count();
+                if(x360_net_active())gPlayerCount=x360_net8_active()?4:x360_net_player_count();
 #endif
                 gPlayerCountSelection1 = gPlayerCount;
                 switch (gPlayerCountSelection1) {

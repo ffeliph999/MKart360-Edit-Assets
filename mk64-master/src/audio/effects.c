@@ -6,6 +6,11 @@
 #include "audio/internal.h"
 #include "audio/load.h"
 #include "audio/data.h"
+#ifdef XBOX360_PORT
+#include <defines.h>
+#include "xbox360/netplay.h"
+extern s32 gGamestate;
+#endif
 
 #ifdef XBOX360_PORT
 /*
@@ -86,6 +91,15 @@ void sequence_player_process_sound(struct SequencePlayer* seqPlayer) {
         seqPlayer->appliedFadeVolume = seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
     }
 
+#ifdef XBOX360_PORT
+    /* Players 0/1 carry music and jingles; player 2 carries sound effects.
+     * Recompute gain so unmuting never restarts the current sequence. */
+    if (seqPlayer == &gSequencePlayers[0] || seqPlayer == &gSequencePlayers[1]) {
+        seqPlayer->appliedFadeVolume = seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
+        if (gGamestate == RACING && !x360_music_enabled()) seqPlayer->appliedFadeVolume = 0.0f;
+        seqPlayer->recalculateVolume = true;
+    }
+#endif
     // Process channels
     for (i = 0; i < CHANNELS_MAX; i++) {
         if (IS_SEQUENCE_CHANNEL_VALID(seqPlayer->channels[i]) == true && seqPlayer->channels[i]->enabled == true) {

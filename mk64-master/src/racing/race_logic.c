@@ -418,9 +418,11 @@ UNUSED void func_8028EC38(s32 arg0) {
 
 void play_music_for_current_track(s32 track) {
 
+#ifndef XBOX360_PORT
     if (gScreenModeSelection == SCREEN_MODE_3P_4P_SPLITSCREEN) {
-        return; // If 3P/4P splitscreen mode is currently on, don't play the music for the current track.
+        return;
     }
+#endif
 
     func_800029B0();
 

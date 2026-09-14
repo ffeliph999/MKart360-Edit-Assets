@@ -66,12 +66,12 @@ struct SPTask* sCurrentDisplaySPTask = NULL;
 struct SPTask* sNextAudioSPTask = NULL;
 struct SPTask* sNextDisplaySPTask = NULL;
 
-struct Controller gControllers[NUM_PLAYERS];
+struct Controller gControllers[NUM_PLAYERS + 1];
 struct Controller* gControllerOne = &gControllers[0];
 struct Controller* gControllerTwo = &gControllers[1];
 struct Controller* gControllerThree = &gControllers[2];
 struct Controller* gControllerFour = &gControllers[3];
-struct Controller* gControllerFive = &gControllers[4]; // All physical controllers combined.`
+struct Controller* gControllerFive = &gControllers[8]; // All physical controllers combined.`
 struct Controller* gControllerSix = &gControllers[5];
 struct Controller* gControllerSeven = &gControllers[6];
 struct Controller* gControllerEight = &gControllers[7];
@@ -111,7 +111,7 @@ OSMesgQueue gSIEventMesgQueue;
 OSMesg gSIEventMesgBuf[3];
 
 OSContStatus gControllerStatuses[4];
-OSContPad gControllerPads[4];
+OSContPad gControllerPads[8];
 u8 gControllerBits;
 // Contains a 32x32 grid of indices into gCollisionIndices containing indices into gCollisionMesh
 CollisionGrid gCollisionGrid[1024];
@@ -369,12 +369,15 @@ void read_controllers(void) {
     osContGetReadData(gControllerPads);
 #else
     if(x360_net_active()) gVBlankTimer=(f32)x360_net_frame()/30.0f;
-    x360_read_controllers(gControllerPads, 4);
+    x360_read_controllers(gControllerPads, x360_net8_active()?8:4);
 #endif
     update_controller(0);
     update_controller(1);
     update_controller(2);
     update_controller(3);
+#ifdef XBOX360_PORT
+    if(x360_net8_active()){int pad;for(pad=4;pad<8;++pad)update_controller(pad);}
+#endif
     gControllerFive->button = (s16) (((gControllerOne->button | gControllerTwo->button) | gControllerThree->button) |
                                      gControllerFour->button);
     gControllerFive->buttonPressed =
@@ -696,11 +699,22 @@ void race_logic_loop(void) {
             break;
 
         case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
+#ifdef XBOX360_PORT
+            /*
+             * Xbox presents this port at a fixed 30 Hz. Always run exactly two
+             * 60 Hz MK64 logic ticks per presented frame. The original N64
+             * DK Jungle 2P compensation used three ticks because that mode
+             * rendered slower on N64 hardware; keeping it here makes the
+             * entire race simulation run at 1.5x speed.
+             */
+            gTickSpeed = 2;
+#else
             if (gCurrentCourseId == COURSE_DK_JUNGLE) {
                 gTickSpeed = 3;
             } else {
                 gTickSpeed = 2;
             }
+#endif
             if (gIsGamePaused == 0) {
                 for (i = 0; i < gTickSpeed; i++) {
                     if (D_8015011E != 0) {
@@ -741,11 +755,19 @@ void race_logic_loop(void) {
 
         case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
 
+#ifdef XBOX360_PORT
+            /*
+             * Match the native 30 Hz Xbox presentation clock: two 60 Hz
+             * simulation ticks for every course, including DK Jungle.
+             */
+            gTickSpeed = 2;
+#else
             if (gCurrentCourseId == COURSE_DK_JUNGLE) {
                 gTickSpeed = 3;
             } else {
                 gTickSpeed = 2;
             }
+#endif
 
             if (gIsGamePaused == 0) {
                 for (i = 0; i < gTickSpeed; i++) {
@@ -1340,7 +1362,7 @@ unsigned int x360_net_state_hash(void) {
     h=net_hash_bytes(h,&gModeSelection,sizeof(gModeSelection));
     h=net_hash_bytes(h,&gRandomSeed16,sizeof(gRandomSeed16));
     if(players<2)players=2;
-    if(players>4)players=4;
+    if(players>8)players=8;
     for(i=0;i<players;++i){
         h=net_hash_bytes(h,&gPlayers[i].type,sizeof(gPlayers[i].type));
         h=net_hash_bytes(h,gPlayers[i].pos,sizeof(gPlayers[i].pos));

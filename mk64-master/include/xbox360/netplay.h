@@ -12,10 +12,14 @@ void x360_control_bind(int player,int action,int source);
 void x360_control_defaults(int player);
 int x360_control_stick(int player,int change);
 int x360_control_deadzone(int player,int change);
+int x360_control_sensitivity(int player,int change);
 unsigned int x360_controls_down(void);
 /* Local presentation setting; never part of the synchronized game state. */
+int x360_music_enabled(void);
+int x360_music_set_enabled(int enabled);
 int x360_display_widescreen(void);
 float x360_display_aspect(void);
+int x360_net8_active(void);
 int x360_net_active(void);
 int x360_net_player_count(void);
 int x360_net_local_slot(void);

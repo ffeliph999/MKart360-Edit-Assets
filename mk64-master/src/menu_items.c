@@ -2782,7 +2782,7 @@ Gfx* func_80095BD0(Gfx* displayListHead, u8* arg1, f32 arg2, f32 arg3, u32 arg4,
     Mtx* sp28;
 
     // A match is a match, but why are goto's required here?
-    if (gMatrixEffectCount >= 0x2F7) {
+    if (gMatrixEffectCount < 0 || gMatrixEffectCount >= MTX_EFFECT_POOL_SIZE) {
         goto func_80095BD0_label1;
     }
     sp28 = &gGfxPool->mtxEffect[gMatrixEffectCount];
@@ -2791,7 +2791,7 @@ Gfx* func_80095BD0(Gfx* displayListHead, u8* arg1, f32 arg2, f32 arg3, u32 arg4,
     }
     goto func_80095BD0_label2;
 func_80095BD0_label1:
-    rmonPrintf("MAX effectcount(760) over!!!!(kawano)\n");
+    rmonPrintf("Effect matrix pool exhausted\n");
     return displayListHead;
 func_80095BD0_label2:
     func_80095AE0((void*) sp28, arg2, arg3, arg6, arg7);

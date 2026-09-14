@@ -600,7 +600,7 @@ static void public_ip(){
     }
     DWORD begin=GetTickCount();
     while(dns->iStatus==WSAEINPROGRESS&&GetTickCount()-begin<4000){
-        screen("HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
+        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
         if(pressed()&XINPUT_GAMEPAD_B)break;
         Sleep(10);
     }
@@ -641,7 +641,7 @@ static void public_ip(){
             net_log("MK64NET4: STUN public endpoint=%s\n",public_address);
             return;
         }
-        screen("HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
+        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
         if(pressed()&XINPUT_GAMEPAD_B)break;
         Sleep(10);
     }
@@ -686,7 +686,7 @@ static void pump(){
                         net_log("MK64NET4: P%u restarted handshake\n",peers[idx].slot+1);
                     }else{
                         int count=peer_count();
-                        if(count>=mknet::MAX_PLAYERS-1){net_log("MK64NET4: HELLO rejected - lobby full\n");continue;}
+                        if(count>=(int)mknet::lobby_capacity()-1){net_log("MK64NET4: HELLO rejected - lobby full\n");continue;}
                         idx=count;reset_peer(peers[idx]);peers[idx].used=true;peers[idx].addr=from;memcpy(peers[idx].nonce,p+12,16);peers[idx].slot=(unsigned)idx+1;
                         char who[80];peer_text(who,from);net_log("MK64NET4: assigned %s -> P%u\n",who,peers[idx].slot+1);
                     }
@@ -746,7 +746,7 @@ static void pump(){
             if(p[5]==mknet::OFFER&&!active){
                 if(!same_ip(join_target,from))continue;
                 if(memcmp(q,nonce,16)){net_log("MK64NET4: OFFER nonce mismatch\n");continue;}
-                unsigned slot=q[20];if(slot<1||slot>=mknet::MAX_PLAYERS)continue;
+                unsigned slot=q[20];if(slot<1||slot>=mknet::lobby_capacity())continue;
                 host_peer=from;memcpy(session,p+12,16);host_session_known=true;assigned_slot=slot;last_received=now;
                 send_ready_from_offer(q);net_log("MK64NET4: OFFER accepted; provisional slot P%u\n",assigned_slot+1);continue;
             }
@@ -757,7 +757,7 @@ static void pump(){
                 } else continue;
             }
             if(p[5]==mknet::START){
-                unsigned delay=q[0],players=q[1],slot=q[2];if(slot!=assigned_slot||slot>=players)continue;
+                unsigned delay=q[0],players=q[1],slot=q[2];if(slot!=assigned_slot||slot>=players||players>mknet::lobby_capacity()||(mknet::lobby_capacity()==8&&players<4))continue;
                 if(!active){chosen_delay=delay;player_count=players;local_slot=slot;stream.reset(chosen_delay,player_count,local_slot);boot.reset(player_count);active=true;net_log("MK64NET4: START P%u players=%u delay=%u\n",local_slot+1,player_count,chosen_delay);}
                 uint8_t ack=uint8_t(local_slot);send_host_message(mknet::START_ACK,&ack,1);last_received=now;continue;
             }
@@ -818,7 +818,7 @@ static bool host_ip_editor(sockaddr_in &out){
     char digits[16]="000.000.000.000";int cursor=0;
     while(true){
         char marker[80];memset(marker,' ',strlen(digits));marker[strlen(digits)]=0;marker[cursor]='^';
-        screen("JOIN 2-4 PLAYER GAME",digits,marker,"WAIT HERE - ACCEPT HOST PARTY INVITE IN GUIDE","AUTO-CONNECTS AFTER PARTY JOIN - A MANUAL IP");WORD p=pressed();
+        screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYERS ONLINE":"JOIN 2-4 PLAYER GAME",digits,marker,"WAIT HERE - ACCEPT HOST PARTY INVITE IN GUIDE","AUTO-CONNECTS AFTER PARTY JOIN - A MANUAL IP");WORD p=pressed();
 
         /*
          * V11: The joining player may stay on this screen while accepting the
@@ -874,7 +874,7 @@ static bool lobby(bool host){
     strcpy(local_address,"LOCAL ADDRESS UNAVAILABLE");XNADDR addr;memset(&addr,0,sizeof(addr));XNetGetTitleXnAddr(&addr);if(addr.ina.s_addr)address_text(local_address,ntohl(addr.ina.s_addr),6464);
 
     if(host){
-        strcpy(public_address,"DISCOVERING PUBLIC ADDRESS");public_ip();screen("HOST 2-4 PLAYER GAME",public_address,local_address,"SETTING UP UDP 6464 AUTOMATICALLY","");
+        strcpy(public_address,"DISCOVERING PUBLIC ADDRESS");public_ip();screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME",public_address,local_address,"SETTING UP UDP 6464 AUTOMATICALLY","");
         bool mapped=map_router(public_address);net_log("MK64NET4: host ready public=%s upnp=%s\n",public_address,mapped?"OK":"NO");
         uint32_t partyIp=0;uint16_t partyPort=0;
         if(mknet::parse_endpoint(public_address,partyIp,partyPort)){
@@ -911,7 +911,7 @@ static bool lobby(bool host){
                 prev_buttons=0;
             }
             if(!start_sent){for(int i=0;i<n;++i)if(now-peers[i].last_offer>=1000)send_offer(i);}
-            if(all_ready()&&!start_sent&&(p&XINPUT_GAMEPAD_A)){
+            if(all_ready()&&n>=(mknet::lobby_capacity()==8?3:1)&&!start_sent&&(p&XINPUT_GAMEPAD_A)){
                 unsigned worst=0,second=0;
                 for(int i=0;i<n;++i){unsigned b=peers[i].latency.budget();if(b>=worst){second=worst;worst=b;}else if(b>second)second=b;}
                 player_count=(unsigned)n+1;
@@ -926,9 +926,9 @@ static bool lobby(bool host){
 
             char status[80],diag[80];
             if(start_sent)_snprintf(status,sizeof(status)-1,"STARTING %uP - ACK %d/%d",player_count,ack_count(),n);
-            else if(n==0)_snprintf(status,sizeof(status)-1,"WAITING FOR PLAYERS (1/4)");
-            else if(all_ready())_snprintf(status,sizeof(status)-1,"PLAYERS %d/4 READY - A START",n+1);
-            else _snprintf(status,sizeof(status)-1,"PLAYERS %d/4 - READY %d/%d",n+1,ready_count(),n);
+            else if(n==0)_snprintf(status,sizeof(status)-1,"WAITING FOR PLAYERS (1/%u)",mknet::lobby_capacity());
+            else if(all_ready()&&n>=(mknet::lobby_capacity()==8?3:1))_snprintf(status,sizeof(status)-1,"PLAYERS %d/%u READY - A START",n+1,mknet::lobby_capacity());
+            else _snprintf(status,sizeof(status)-1,"PLAYERS %d/%u - READY %d/%d",n+1,mknet::lobby_capacity(),ready_count(),n);
             status[sizeof(status)-1]=0;
             _snprintf(diag,sizeof(diag)-1,"RX=%u V=%u H=%u R=%u",net_rx_total,net_rx_valid,net_rx_hello,net_rx_ready);diag[sizeof(diag)-1]=0;
             {
@@ -939,13 +939,13 @@ static bool lobby(bool host){
                 const char *friendLine=partyReady
                     ?"FRIEND: JOIN PARTY, RUN MK360, CHOOSE JOIN, PRESS X"
                     :"AFTER STARTING PARTY: RETURN HERE AND PRESS X AGAIN";
-                screen("HOST 2-4 PLAYER GAME",public_address,status,partyLine,friendLine);
+                screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME",public_address,status,partyLine,friendLine);
             }
             if(start_sent){for(int i=0;i<n;++i)if(now-peers[i].last_received>30000){net_log("MK64NET4: P%u start timeout\n",peers[i].slot+1);failed=true;}}
         }else{
             char status[80],diag[80];if(host_session_known)_snprintf(status,sizeof(status)-1,"ASSIGNED P%u - WAITING FOR HOST",assigned_slot+1);else _snprintf(status,sizeof(status)-1,"CONNECTING TO HOST");status[sizeof(status)-1]=0;
             _snprintf(diag,sizeof(diag)-1,"RX=%u V=%u OFFER=%u TX=%u F=%u",net_rx_total,net_rx_valid,net_rx_offer,net_tx_punch,net_tx_punch_fail);diag[sizeof(diag)-1]=0;
-            screen("JOIN 2-4 PLAYER GAME",status,local_address,diag,"ALL GUESTS ENTER SAME HOST IP");
+            screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYERS ONLINE":"JOIN 2-4 PLAYER GAME",status,local_address,diag,"ALL GUESTS ENTER SAME HOST IP");
             if(now-last_received>30000){net_log("MK64NET4: join timeout after 30s\n");failed=true;}
         }
         Sleep(10);
@@ -979,18 +979,21 @@ static void controls_menu(){
         for(int i=0;i<4;++i){int item=page+i;
             if(item<14)_snprintf(lines[i],sizeof(lines[i]),"%c %s: %s",item==row?'>':' ',x360_control_action(item),x360_control_binding(player,item));
             else if(item==14)_snprintf(lines[i],sizeof(lines[i]),"%c STEERING: %s STICK",item==row?'>':' ',x360_control_stick(player,0)?"RIGHT":"LEFT");
-            else _snprintf(lines[i],sizeof(lines[i]),"%c DEAD ZONE: %d PERCENT",item==row?'>':' ',x360_control_deadzone(player,0));
+            else if(item==15)_snprintf(lines[i],sizeof(lines[i]),"%c DEAD ZONE: %d PERCENT",item==row?'>':' ',x360_control_deadzone(player,0));
+            else if(item==16)_snprintf(lines[i],sizeof(lines[i]),"%c STEERING SENSITIVITY: %d PERCENT",item==row?'>':' ',x360_control_sensitivity(player,0));
+            else lines[i][0]=0;
             lines[i][sizeof(lines[i])-1]=0;
         }
         screen(title,lines[0],lines[1],lines[2],lines[3],"A REBIND    X CLEAR    Y DEFAULTS","LB/RB CONTROLLER   LEFT/RIGHT ADJUST   B SAVE/BACK");
         WORD p=pressed(false);
         if(p&XINPUT_GAMEPAD_B){if(dirty){int saved=x360_controls_save();screen(saved?"CONTROLS SAVED":"CONTROLS ACTIVE",saved?"READY FOR NEXT LAUNCH":"COULD NOT SAVE TO GAME FOLDER","",saved?"":"USING THESE SETTINGS FOR THIS LAUNCH","","","B BACK");Sleep(650);}return;}
-        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%16;if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+15)%16;
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%17;if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+16)%17;
         if(p&XINPUT_GAMEPAD_LEFT_SHOULDER)player=(player+3)%4;if(p&XINPUT_GAMEPAD_RIGHT_SHOULDER)player=(player+1)%4;
         if(p&XINPUT_GAMEPAD_Y){x360_control_defaults(player);dirty=true;}
         if(row<14&&(p&XINPUT_GAMEPAD_X)){x360_control_bind(player,row,255);dirty=true;}
         if(row==14&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))){x360_control_stick(player,1);dirty=true;}
         if(row==15&&(p&(XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))){x360_control_deadzone(player,(p&XINPUT_GAMEPAD_DPAD_LEFT)?-1:1);dirty=true;}
+        if(row==16&&(p&(XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))){x360_control_sensitivity(player,(p&XINPUT_GAMEPAD_DPAD_LEFT)?-5:5);dirty=true;}
         if(row<14&&(p&XINPUT_GAMEPAD_A)){
             bool released=false;
             for(;;){screen("PRESS A CONTROL",x360_control_action(row),"BUTTON, TRIGGER OR STICK DIRECTION","BACK CANCELS THIS BINDING","","RELEASE THE CURRENT CONTROL FIRST","MENU NAVIGATION ALWAYS USES DEFAULT BUTTONS");
@@ -1039,21 +1042,23 @@ static void logging_menu(){
 }
 
 static void options_menu(){
-    int row=0;prev_buttons=0;
+    int row=0;bool save_failed=false;prev_buttons=0;
     for(;;){
-        char aspect[64],controls[80],logging[80],hint[80];
+        char aspect[64],controls[80],logging[80],music[80];
         _snprintf(aspect,sizeof(aspect)-1,"%c ASPECT: %s",row==0?'>':' ',display_wide?"16:9":"4:3");aspect[sizeof(aspect)-1]=0;
         _snprintf(controls,sizeof(controls)-1,"%c CONTROLLER REBINDING",row==1?'>':' ');controls[sizeof(controls)-1]=0;
         _snprintf(logging,sizeof(logging)-1,"%c LOGGING SETTINGS",row==2?'>':' ');logging[sizeof(logging)-1]=0;
-        _snprintf(hint,sizeof(hint)-1,"GAME:%s  NET:%s  PARTY:%s",x360_logging_enabled()?"ON":"OFF",netplay_logging_enabled?"ON":"OFF",x360_party_logging_enabled()?"ON":"OFF");hint[sizeof(hint)-1]=0;
-        screen("OPTIONS",aspect,controls,logging,hint,"A SELECT    LEFT/RIGHT CHANGE ASPECT    B BACK","LOGGERS ARE CONTROLLED SEPARATELY");
+        _snprintf(music,sizeof(music)-1,"%c IN-GAME MUSIC: %s",row==3?'>':' ',x360_music_enabled()?"ON":"OFF");music[sizeof(music)-1]=0;
+        screen("OPTIONS",aspect,controls,logging,music,"A SELECT    LEFT/RIGHT CHANGE    B BACK",
+            save_failed?"MUSIC CHANGED; COULD NOT SAVE TO DISK":"DPAD LEFT/RIGHT ALSO STEERS IN GAME");
         WORD p=pressed(false);
         if(p&XINPUT_GAMEPAD_B){prev_buttons=0;return;}
-        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+2)%3;
-        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%3;
+        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+3)%4;
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%4;
         if(row==0&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))display_wide=!display_wide;
         if(row==1&&(p&XINPUT_GAMEPAD_A)){controls_menu();prev_buttons=0;}
         if(row==2&&(p&XINPUT_GAMEPAD_A)){logging_menu();prev_buttons=0;}
+        if(row==3&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))save_failed=!x360_music_set_enabled(!x360_music_enabled());
         Sleep(16);
     }
 }
@@ -1062,20 +1067,33 @@ extern "C" int x360_net_boot_menu(void){
     x360_controls_load();
     int selection=0;
     for(;;){
-        char stress_item[80];_snprintf(stress_item,sizeof(stress_item)-1,"%c OPTIONS / CONTROLS / LOGGING   %s",selection==3?'>':' ',display_wide?"16:9":"4:3");stress_item[sizeof(stress_item)-1]=0;
-        screen("MARIO KART 64 - 2-4P NETPLAY",selection==0?"> OFFLINE":"  OFFLINE",selection==1?"> HOST 2-4 PLAYER GAME":"  HOST 2-4 PLAYER GAME",selection==2?"> JOIN 2-4 PLAYER GAME":"  JOIN 2-4 PLAYER GAME",stress_item);
-        WORD p=pressed();if(p&XINPUT_GAMEPAD_DPAD_DOWN)selection=(selection+1)%4;if(p&XINPUT_GAMEPAD_DPAD_UP)selection=(selection+3)%4;
+        IDirect3DDevice9 *dev=x360_d3d_device();
+        if(dev){
+            D3DVIEWPORT9 full={0,0,1280,720,0,1};dev->SetViewport(&full);
+            RECT all={0,0,1280,720};dev->SetScissorRect(&all);
+            dev->Clear(0,0,D3DCLEAR_TARGET,0xFF102030,1,0);
+            net_text(dev,72,54,"MARIO KART 64 - ONLINE",5,0xFFFFD050);
+            const char *labels[]={"OFFLINE","HOST 2-4 PLAYER GAME","JOIN 2-4 PLAYER GAME",
+                "HOST 4-8 PLAYERS ONLINE","JOIN 4-8 PLAYERS ONLINE","OPTIONS / CONTROLS / LOGGING"};
+            for(int row=0;row<6;++row){char line[96];_snprintf(line,sizeof(line),"%c %s",row==selection?'>':' ',labels[row]);net_text(dev,72,170+row*60,line,3,row==selection?0xFFFFD050:0xFFFFFFFF);}
+            net_text(dev,72,600,"A SELECT    UP/DOWN CHOOSE",3,0xFFAAAAAA);
+            net_text(dev,72,646,"4-8 PLAYER MODE: EXPERIMENTAL RACING / BATTLE",3,0xFFAAAAAA);
+            dev->Present(0,0,0,0);
+        }
+        WORD p=pressed();if(p&XINPUT_GAMEPAD_DPAD_DOWN)selection=(selection+1)%6;if(p&XINPUT_GAMEPAD_DPAD_UP)selection=(selection+5)%6;
         if(p&XINPUT_GAMEPAD_X){mk_stress_menu();continue;}
         if(p&XINPUT_GAMEPAD_A){
             if(selection==0){close_network();return 0;}
-            if(selection==3){options_menu();continue;}
-            if(lobby(selection==1))return 1;
+            if(selection==5){options_menu();continue;}
+            mknet::lobby_capacity()=(selection==3||selection==4)?8:4;
+            if(lobby(selection==1||selection==3))return 1;
             while(true){screen("CONNECTION NOT ESTABLISHED","NO GAME WAS STARTED","ALL GUESTS USE THE SAME HOST IP","CHECK UDP 6464 / NETWORK SETTINGS","A RETURN TO MENU");if(pressed()&XINPUT_GAMEPAD_A)break;Sleep(16);}
         }
         Sleep(16);
     }
 }
 
+extern "C" int x360_net8_active(void){return active&&mknet::lobby_capacity()==8;}
 extern "C" int x360_net_active(void){return active?1:0;}
 extern "C" int x360_net_player_count(void){return active?(int)player_count:1;}
 extern "C" int x360_net_local_slot(void){return active?(int)local_slot:0;}

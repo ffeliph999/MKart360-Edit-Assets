@@ -1,5 +1,7 @@
 #include "xbox360/netplay_protocol.h"
 #include "xbox360/netplay_view.h"
+#include "xbox360/controller_config.h"
+#include "xbox360/texture_dimensions.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <math.h>
@@ -70,7 +72,7 @@ static void simulate(unsigned players,unsigned rtt,unsigned jitter,unsigned loss
     for(;now<120000;++now){
         std::sort(q.begin(),q.end(),Due());
         while(!q.empty()&&q[0].due<=now){Message m=q.front();q.erase(q.begin());
-            if(m.to==0)streams[0].receive_client(m.from,m.data,m.n);else streams[m.to].receive_frameset(m.data,m.n);
+            if(m.to==0)streams[0].receive_remote(m.from,m.data,m.n);else streams[m.to].receive_frameset(m.data,m.n);
         }
         bool done=true;
         for(unsigned s=0;s<players;++s){
@@ -99,11 +101,11 @@ static void protocol_edges(){
     uint8_t p[MAX_PACKET]={0},session[16]={0};
     BootBarrier b;b.reset(4);CHECK(!b.all_ready());CHECK(!b.ready(4));CHECK(b.ready(3));CHECK(b.ready(1));CHECK(!b.all_ready());CHECK(b.ready(2));CHECK(b.all_ready());
     Stream4 h,c;h.reset(4,2,0);c.reset(4,2,1);h.sample_local(input(0,0),123);c.sample_local(input(0,1),123);
-    int n=c.client_packet(p,session);CHECK(h.receive_client(1,p,n));CHECK(h.receive_client(1,p,n));CHECK(!h.receive_client(2,p,n));
+    int n=c.client_packet(p,session);CHECK(h.receive_remote(1,p,n));CHECK(h.receive_remote(1,p,n));CHECK(!h.receive_remote(2,p,n));
     for(int len=0;len<n;++len)CHECK(!valid(p,len));
     uint8_t saved=p[4];p[4]=2;CHECK(!valid(p,n));p[4]=saved;
-    p[HEADER+16+4*4]^=1;CHECK(!h.receive_client(1,p,n));CHECK(h.fault);
-    h.reset(4,2,0);c.reset(4,2,1);h.sample_local(input(0,0),1);c.sample_local(input(0,1),2);n=c.client_packet(p,session);CHECK(!h.receive_client(1,p,n));CHECK(h.fault);
+    p[HEADER+16+4*4]^=1;CHECK(!h.receive_remote(1,p,n));CHECK(h.fault);
+    h.reset(4,2,0);c.reset(4,2,1);h.sample_local(input(0,0),1);c.sample_local(input(0,1),2);n=c.client_packet(p,session);CHECK(!h.receive_remote(1,p,n));CHECK(h.fault);
     Latency l={0,0,0};for(int i=0;i<16;++i)l.add(40);unsigned stable=input_delay(l.budget());l.add(200);CHECK(input_delay(l.budget())>stable);CHECK(input_delay(0)==2);CHECK(input_delay(10000)==MAX_DELAY);
     // A receiver needs frame 50, outside the ordinary tail ending at frame 100.
     h.reset(4,2,0);h.frame=100;h.latest_complete=100;h.peer_frame[1]=50;
@@ -117,4 +119,35 @@ static void protocol_edges(){
     h.reset(12,2,0);n=h.frameset_packet(p,session,1);CHECK(c.receive_frameset(p,n));
     CHECK(c.inputs[1][257%HISTORY].frame==future.frame);CHECK(equal(c.inputs[1][257%HISTORY].pad,future.pad));CHECK(!c.fault);
 }
-int main(){views();protocol_edges();for(unsigned p=2;p<=4;++p){simulate(p,0,0,0,false);simulate(p,80,20,5,false);simulate(p,180,60,10,false);simulate(p,80,30,5,true);}printf("PASS %u checks\n",checks);}
+static void controls_and_textures(){
+    const uint32_t left=1U<<mkcontrols::LEFT,right=1U<<mkcontrols::RIGHT;
+    for(int value=-128;value<=127;++value){
+        CHECK(mkcontrols::steer((int8_t)value,0)==value);
+        CHECK(mkcontrols::steer((int8_t)value,left)==-127);
+        CHECK(mkcontrols::steer((int8_t)value,right)==127);
+        CHECK(mkcontrols::steer((int8_t)value,left|right)==0);
+    }
+    // Old controller saves remain compatible, including custom stick/bindings.
+    mkcontrols::Config c,decoded;mkcontrols::defaults(c);c.player[2].stick=1;c.player[1].bind[0]=mkcontrols::X;
+    uint8_t data[mkcontrols::RECORD_BYTES];uint32_t gen=0;
+    mkcontrols::encode(c,42,data);CHECK(mkcontrols::decode(data,sizeof(data),decoded,gen));
+    CHECK(gen==42&&memcmp(&c,&decoded,sizeof(c))==0);
+    data[22]^=1;CHECK(!mkcontrols::decode(data,sizeof(data),decoded,gen));
+    for(unsigned players=2;players<=4;++players)for(unsigned slot=0;slot<players;++slot){
+        Stream4 host,client;host.reset(7,players,0);client.reset(7,players,slot);
+        Pad p={0,mkcontrols::steer(0,left),0};client.sample_local(p,12);
+        uint8_t packet[MAX_PACKET],session[16]={0};
+        if(slot){int n=client.client_packet(packet,session);CHECK(host.receive_remote(slot,packet,n));
+            CHECK(host.inputs[slot][7].pad.x==-127);}
+        else CHECK(client.inputs[slot][7].pad.x==-127);
+    }
+    // Inclusive menu strip loads must wrap at the N64 mask period.
+    CHECK(x360_texture_period(33,5,0)==32);
+    CHECK(x360_texture_period(33,5,1)==32); // mirrored wrap
+    CHECK(x360_texture_period(33,5,2)==33); // clamp keeps the full image
+    CHECK(x360_texture_period(26,5,0)==26); // short final strip
+    CHECK(x360_texture_period(33,0,0)==33); // no mask
+    CHECK(x360_texture_period(64,5,0)==32);
+    CHECK(x360_texture_period(32,5,0)==32);
+}
+int main(){views();controls_and_textures();protocol_edges();for(unsigned p=2;p<=4;++p){simulate(p,0,0,0,false);simulate(p,80,20,5,false);simulate(p,180,60,10,false);simulate(p,80,30,5,true);}printf("PASS %u checks\n",checks);}

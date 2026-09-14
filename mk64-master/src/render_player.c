@@ -1,5 +1,6 @@
 #ifdef XBOX360_PORT
 #include "xbox360/assets.h"
+#include "xbox360/netplay.h"
 #endif
 #include <ultra64.h>
 #include <macros.h>
@@ -77,10 +78,31 @@ void func_8001F9E4(Player* player, Camera* camera, s8 screenId) {
     UNUSED s32 pad;
     s32 sp30;
     s32 sp2C;
+    f32 sideRange;
+    f32 sideTail;
     UNUSED s32 pad2;
 
     get_player_index_for_player(player);
     func_8001F980(&sp30, &sp2C);
+
+    /*
+     * X360_ONLINE_FULLSCREEN_CULLING:
+     * camera.c deliberately uses 1P chase-camera tuning during netplay, even
+     * while gActiveScreenMode remains 2P/3P/4P for game logic. Native MP
+     * SIDE_OF_KART culling uses only 150 units, while 1P uses 250. After the
+     * race-start camera hands off to the 1P-style chase camera, the kart can
+     * therefore fall outside the old MP particle/shadow gate.
+     *
+     * Match the visibility range to the camera tuning. This is render-only.
+     */
+    sideRange = (f32) D_80165580;
+    sideTail = (f32) D_80165582;
+#ifdef XBOX360_PORT
+    if (x360_net_active()) {
+        sideRange = 250.0f; /* 1P D_80165580 */
+        sideTail = 0.0f;    /* 1P D_80165582 */
+    }
+#endif
 
     player->unk_002 &= ~(UNK_002_UNKNOWN_0x2 << (screenId * 4));
     player->unk_002 &= ~(SIDE_OF_KART << (screenId * 4));
@@ -88,7 +110,7 @@ void func_8001F9E4(Player* player, Camera* camera, s8 screenId) {
     if (check_player_camera_collision(player, camera, (f32) (D_80165578 + sp30), (f32) (D_8016557A + sp2C)) == 1) {
         player->unk_002 |= UNK_002_UNKNOWN_0x2 << (screenId * 4);
     }
-    if (check_player_camera_collision(player, camera, (f32) D_80165580, (f32) D_80165582) == 1) {
+    if (check_player_camera_collision(player, camera, sideRange, sideTail) == 1) {
         player->unk_002 |= SIDE_OF_KART << (screenId * 4);
     }
 }
@@ -105,10 +127,19 @@ u16 check_player_camera_collision(Player* player, Camera* camera, f32 arg2, f32 
     f32 sp48;
     f32 sp44;
     s16 var_v0;
+    s32 viewMode;
     u16 ret;
 
     ret = false;
-    switch (gActiveScreenMode) { /* irregular */
+    viewMode = gActiveScreenMode;
+#ifdef XBOX360_PORT
+    /*
+     * Keep the camera-frustum angle consistent with camera.c's online
+     * camera_view_mode(), which already forces SCREEN_MODE_1P in netplay.
+     */
+    if (x360_net_active()) viewMode = SCREEN_MODE_1P;
+#endif
+    switch (viewMode) { /* irregular */
         case SCREEN_MODE_1P:
             var_v0 = 0x293C;
             break;

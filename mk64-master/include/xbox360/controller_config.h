@@ -20,6 +20,11 @@ inline int8_t axis(int value,unsigned deadzone){
     int scaled=value/256;
     if(scaled<-128)scaled=-128;if(scaled>127)scaled=127;return int8_t(scaled);
 }
+/* D-pad steering augments the chosen stick; opposite directions cancel. */
+inline int8_t steer(int8_t analog,uint32_t down){
+    const bool left=(down&(1U<<LEFT))!=0,right=(down&(1U<<RIGHT))!=0;
+    return left||right ? (left==right?0:left?-127:127) : analog;
+}
 inline uint32_t get32(const uint8_t*p){return uint32_t(p[0])<<24|uint32_t(p[1])<<16|uint32_t(p[2])<<8|p[3];}
 inline void put32(uint8_t*p,uint32_t n){p[0]=uint8_t(n>>24);p[1]=uint8_t(n>>16);p[2]=uint8_t(n>>8);p[3]=uint8_t(n);}
 inline uint32_t checksum(const uint8_t*p){uint32_t h=2166136261U;for(int i=0;i<RECORD_BYTES-4;++i)h=(h^p[i])*16777619U;return h;}

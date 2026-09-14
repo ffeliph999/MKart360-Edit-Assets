@@ -4,6 +4,31 @@
  */
 
 #include <ultra64.h>
+#ifdef XBOX360_PORT
+#include "xbox360/netplay.h"
+
+/*
+ * Online fullscreen presentation still executes MK64's native split-screen
+ * render passes. Only one native view is actually presented on each Xbox,
+ * so do not spend the finite mtxEffect pool on hidden native views.
+ *
+ * This is RENDER-ONLY. Particle creation/update, physics, RNG and netplay
+ * state remain identical on every console.
+ *
+ * Keep 5-8P untouched for now: its final native-screen -> local-slot mapping
+ * is a separate presentation integration step.
+ */
+#define X360_SHARED_EFFECTS x360_net_active()
+#define X360_EFFECT_SCREEN_VISIBLE(screenId) \
+    (!x360_net_active() || x360_net_player_count() < 2 || x360_net_player_count() > 4 || \
+     (screenId) == x360_net_local_slot())
+#define X360_SHARED_EFFECTS_LOCAL_VIEW \
+    (X360_SHARED_EFFECTS && x360_net_player_count() >= 2 && x360_net_player_count() <= 4)
+#else
+#define X360_SHARED_EFFECTS 0
+#define X360_EFFECT_SCREEN_VISIBLE(screenId) 1
+#define X360_SHARED_EFFECTS_LOCAL_VIEW 0
+#endif
 #include <macros.h>
 #include <PR/gbi.h>
 #include <mk64.h>
@@ -6491,11 +6516,15 @@ void func_8006D194(Player* player, s8 playerIndex, s8 arg2) {
 
 void func_8006D474(Player* player, s8 playerId, s8 screenId) {
     s16 var_s2;
+
+    if (!X360_EFFECT_SCREEN_VISIBLE(screenId)) {
+        return;
+    }
     if ((player->unk_002 & (SIDE_OF_KART << (screenId * 4))) == (SIDE_OF_KART << (screenId * 4))) {
         for (var_s2 = 0; var_s2 < 10; var_s2++) {
             switch (player->particlePool0[var_s2].type) {
                 case 1:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             func_8006538C(player, playerId, var_s2, screenId);
                         }
@@ -6504,11 +6533,11 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
                     }
                     break;
                 case 6:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             func_80066BAC(player, playerId, var_s2, screenId);
                         }
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80066BAC(player, playerId, var_s2, screenId);
                     }
                     break;
@@ -6516,65 +6545,65 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
             switch (player->particlePool3[var_s2].type) {
                 case 1:
                 case 9:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         render_actor_bonk_particles(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         render_actor_bonk_particles(player, playerId, var_s2, screenId);
                     }
                     break;
                 case 2:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         render_wall_bonk_star_particles(player, playerId, var_s2, screenId, player->particlePool3[var_s2].scale);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         render_wall_bonk_star_particles(player, playerId, var_s2, screenId, player->particlePool3[var_s2].scale);
                     }
                     break;
                 case 3:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         func_80067280(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80067280(player, (s32) playerId, var_s2, screenId);
                     }
                     break;
                 case 4:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         func_80069444(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80069444(player, playerId, var_s2, screenId);
                     }
                     break;
                 case 5:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         func_80069938(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80069938(player, playerId, var_s2, screenId);
                     }
                     break;
                 case 6:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         func_80069BA8(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80069BA8(player, playerId, var_s2, screenId);
                     }
                     break;
                 case 7:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         func_80069DB8(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_80069DB8(player, playerId, var_s2, screenId);
                     }
                     break;
                 case 8:
-                    if (gActiveScreenMode == SCREEN_MODE_1P) {
+                    if ((gActiveScreenMode == SCREEN_MODE_1P || X360_SHARED_EFFECTS)) {
                         render_player_boost_spark_particles(player, playerId, var_s2, screenId);
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         render_player_boost_spark_particles(player, playerId, var_s2, screenId);
                     }
                     break;
             }
             switch (player->particlePool1[var_s2].type) {
                 case DRIFT_PARTICLE:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             render_player_drift_particles(player, playerId, var_s2, screenId);
                         }
@@ -6586,7 +6615,7 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
                 case GRASS_PARTICLE:
                 case 4:
                 case 5:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             render_player_ground_particles(player, playerId, var_s2, screenId);
                         }
@@ -6595,7 +6624,7 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
                     }
                     break;
                 case 9:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             func_800664E0(player, (s32) playerId, var_s2, screenId);
                         }
@@ -6604,11 +6633,11 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
                     }
                     break;
                 case 11:
-                    if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+                    if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                         if (screenId == playerId) {
                             func_8006A01C(player, playerId, var_s2, screenId);
                         }
-                    } else if (screenId == playerId) {
+                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
                         func_8006A01C(player, playerId, var_s2, screenId);
                     }
                     break;
@@ -6624,6 +6653,10 @@ void func_8006DC54(Player* player, s8 playerIndex, s8 screenId) {
     s16 i;
     s32 bitwiseMask;
 
+    if (!X360_EFFECT_SCREEN_VISIBLE(screenId)) {
+        return;
+    }
+
     bitwiseMask = SIDE_OF_KART << (screenId * 4);
     if (bitwiseMask == (player->unk_002 & bitwiseMask)) {
         for (i = 0; i < 10; i++) {
@@ -6638,6 +6671,10 @@ void func_8006DD3C(Player* arg0, s8 arg1, s8 arg2) {
     s16 temp_s0;
     s32 temp_v0;
 
+    if (!X360_EFFECT_SCREEN_VISIBLE(arg2)) {
+        return;
+    }
+
     temp_v0 = SIDE_OF_KART << (arg2 * 4);
     if (temp_v0 == (arg0->unk_002 & temp_v0)) {
         for (temp_s0 = 0; temp_s0 < 10; ++temp_s0) {
@@ -6646,7 +6683,7 @@ void func_8006DD3C(Player* arg0, s8 arg1, s8 arg2) {
                 if (temp_v0 == 5) {
                     func_8006A280(arg0, arg1, temp_s0, arg2);
                 }
-            } else if (gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN) {
+            } else if ((gActiveScreenMode == SCREEN_MODE_3P_4P_SPLITSCREEN && !X360_SHARED_EFFECTS)) {
                 if (arg2 == arg1) {
                     func_80066998(arg0, arg1, temp_s0, arg2);
                 }
@@ -6655,7 +6692,13 @@ void func_8006DD3C(Player* arg0, s8 arg1, s8 arg2) {
             }
         }
 
-        if (((arg0->type & PLAYER_HUMAN) == PLAYER_HUMAN) && (arg2 == arg1)) {
+        /*
+         * Native split-screen keeps these owner-only to save work. Online
+         * fullscreen needs remote racers' visible crash/whirr/boing/pomp and
+         * speech/music-note effects in the one local camera view.
+         */
+        if (((arg0->type & PLAYER_HUMAN) == PLAYER_HUMAN) &&
+            ((arg2 == arg1) || X360_SHARED_EFFECTS_LOCAL_VIEW)) {
             switch (arg0->particlePool2[0].type) {
                 case 2:
                     render_player_onomatopoeia_crash(arg0, arg1, arg0->particlePool2[0].scale, arg2, 0);

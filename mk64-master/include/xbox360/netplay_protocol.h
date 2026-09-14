@@ -20,16 +20,19 @@ namespace mknet {
 
 enum {
     VERSION=3,
-    BUILD=0xB2400915,
+    BUILD=0xB2700914,
     /* MK64_V3_2P_4P_EARLY_RELAY_LOW_LATENCY */
     HEADER=28,
     HISTORY=256,
     REDUNDANCY=24,
     MAX_DELAY=12,
-    MAX_PLAYERS=4,
-    MAX_PACKET=512
+    MAX_PLAYERS=8,
+    MAX_PACKET=1024
 };
 
+/* Separate wire signatures prevent a 2-4 lobby accepting a 4-8 client. */
+inline unsigned &lobby_capacity(){static unsigned value=4;return value;}
+inline const char *wire_magic(){return lobby_capacity()==8?"MK8P":"MK4P";}
 enum Type {
     HELLO=1,
     OFFER,
@@ -66,7 +69,7 @@ inline Pad decode_pad(const uint8_t *p) {
 
 inline int header(uint8_t *p,Type t,const uint8_t session[16],int payload) {
     memset(p,0,HEADER);
-    memcpy(p,"MK4P",4);
+    memcpy(p,wire_magic(),4);
     p[4]=VERSION;
     p[5]=uint8_t(t);
     p[6]=uint8_t((HEADER+payload)>>8);
@@ -77,7 +80,7 @@ inline int header(uint8_t *p,Type t,const uint8_t session[16],int payload) {
 }
 
 inline bool valid(const uint8_t *p,int n) {
-    if(n<(int)HEADER||n>(int)MAX_PACKET||memcmp(p,"MK4P",4)||p[4]!=VERSION||get32(p+8)!=(uint32_t)BUILD)return false;
+    if(n<(int)HEADER||n>(int)MAX_PACKET||memcmp(p,wire_magic(),4)||p[4]!=VERSION||get32(p+8)!=(uint32_t)BUILD)return false;
     if((int(p[6])*256+p[7])!=n)return false;
     int payload=n-HEADER;
     const uint8_t *q=p+HEADER;
