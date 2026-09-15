@@ -54,6 +54,14 @@ mk64-master\baserom.us.z64
 - Your own US Mario Kart 64 ROM
 - An Xbox 360 capable of running homebrew XEX files or latest Xenia Netplay version with xbox live turned on
 
+
+## Easy prepare assets and build script
+
+Make sure `baserom.us.z64` is in `mk64-master` . `baserom.us.z64` is just the US rom renamed 
+
+Right click PUBLIC_BUILD_XBOX360.ps1 then click run with powershell
+This will prepare assets and compile
+
 ## Preparing the assets
 
 Open PowerShell in the `mk64-master` folder and run:
