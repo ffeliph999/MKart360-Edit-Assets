@@ -8,7 +8,7 @@ typedef struct {
 typedef struct {
     int players, count, place[8], order[8], finalLap[8], done;
 } Race8Results;
-static int race8_valid_count(int count) { return count >= 4 && count <= 8; }
+static int race8_valid_count(int count) { return count >= 2 && count <= 8; }
 static void race8_lobby_init(Race8Lobby *s, int count) {
     int i;
     s->players = race8_valid_count(count) ? count : 4;

@@ -23,7 +23,15 @@ static int x360_audio_player(void) {
     return mk_audio_local_player(x360_net_active(), gGamestate == RACING,
                                 x360_net_player_count(), x360_net_local_slot());
 }
+static int x360_audio_count(void) {return x360_audio_player()>=0 ? x360_net_local_count() : 1;}
+static int x360_audio_is_local(int player) {
+    int first=x360_audio_player();return first>=0 && player>=first && player<first+x360_audio_count();
+}
+static int x360_audio_secondary(int player) {return x360_audio_is_local(player) && player!=x360_audio_player();}
 #else
+#define x360_audio_count() 1
+#define x360_audio_is_local(player) 0
+#define x360_audio_secondary(player) 0
 #define x360_audio_player() (-1)
 #endif
 
@@ -442,7 +450,8 @@ void func_800C1F8C(void) {
 #ifdef XBOX360_PORT
     if (x360_audio_player() >= 0) {
         /* Audio camera zero is this console's viewport, never another listener. */
-        gCopyCamera[0] = &cameras[x360_audio_player()];
+        for(cameraId=0;cameraId<x360_audio_count();++cameraId)
+            gCopyCamera[cameraId] = &cameras[x360_audio_player()+cameraId];
     }
 #endif
     var_a1 = D_800EA1C0 + 1;
@@ -524,7 +533,7 @@ void func_800C2274(u8 player) {
 
     var_a2 = 0xF;
     if (gSequencePlayers[player].enabled != 0) {
-        switch (x360_audio_player() >= 0 ? 0 : gScreenModeSelection) { /* audio layout */
+        switch (x360_audio_player() >= 0 ? x360_audio_count()-1 : gScreenModeSelection) { /* audio layout */
             case 0:
                 break;
             case 1:
@@ -914,7 +923,7 @@ void func_800C2A2C(u32 cmd) {
         case 15:
             seqId = cmd & 0xFF;
             subArgs = (cmd & 0xFF00) >> 8;
-            if (x360_audio_player() >= 0) subArgs = 0;
+            if (x360_audio_player() >= 0) subArgs = x360_audio_count()-1;
             D_800EA1C0 = subArgs;
             audio_reset_session_eu((void*) seqId);
             D_800EA1F4[0] = seqId;
@@ -1268,11 +1277,12 @@ void play_sound(u32 soundBits, Vec3f* position, u8 cameraId, f32* arg3, f32* arg
         int source;
         for (source = 0; source < 8; ++source) {
             if (position == &D_800E9F7C[source].pos) {
-                if (source != x360_audio_player()) return;
+                if (!x360_audio_is_local(source)) return;
+                cameraId=(u8)(source-x360_audio_player());
                 break;
             }
         }
-        cameraId = 0;
+        if(source==8 && cameraId>=x360_audio_count())cameraId=0;
     }
     bank = soundBits >> 0x1C;
     if (bank >= SOUND_BANK_COUNT) return;
@@ -2468,13 +2478,15 @@ void func_800C76C0(u8 playerId) {
             D_800E9E74[playerId] = 0;
 #ifdef XBOX360_PORT
             if (x360_audio_player() >= 0 && (gModeSelection == VERSUS || gModeSelection == BATTLE)) {
-                int won = gModeSelection == BATTLE ? gPlayerWinningIndex == playerId : gPlayers[playerId].currentRank == 0;
-                func_800C3448(0x100100FF);
-                func_800C3448(0x110100FF);
+                int won = gModeSelection == BATTLE ? gPlayerWinningIndex == x360_audio_player() : gPlayers[x360_audio_player()].currentRank == 0;
                 D_800EA0EC[playerId] = 2;
                 func_800C9060(playerId, 0x1900F103U);
-                play_sequences(won ? SEQ_EVENT_RACE_FINISH_FIRST : SEQ_EVENT_RACE_FINISH_OTHER,
-                               won ? SEQ_MENU_RESULTS_SCREEN_WIN_VS : SEQ_MENU_RESULTS_SCREEN_LOSE);
+                /* One TV mix: keep racing music until both local racers finish. */
+                if(D_800EA0F0){
+                    func_800C3448(0x100100FF);func_800C3448(0x110100FF);
+                    play_sequences(won ? SEQ_EVENT_RACE_FINISH_FIRST : SEQ_EVENT_RACE_FINISH_OTHER,
+                                   won ? SEQ_MENU_RESULTS_SCREEN_WIN_VS : SEQ_MENU_RESULTS_SCREEN_LOSE);
+                }
             } else
 #endif
             switch (gModeSelection) { /* irregular */
@@ -2880,19 +2892,19 @@ void func_800C8AE4(void) {
                     }
                     break;
                 case 1:
-                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0)) {
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player()+1 : 1].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
                     }
                     break;
                 case 2:
-                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0)) {
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player()+1 : 1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
                     }
                     break;
                 case 3:
-                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0) ||
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player()+1 : 1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0) ||
                         (D_800E9F7C[3].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
@@ -2911,7 +2923,7 @@ void func_800C8CCC() {
     u8 var_s0;
 
     for (var_s0 = (x360_audio_player() >= 0 ? x360_audio_player() : 0);
-         var_s0 < (x360_audio_player() >= 0 ? x360_audio_player() + 1 : D_800EA1C0 + 1); var_s0++) {
+         var_s0 < (x360_audio_player() >= 0 ? x360_audio_player() + x360_audio_count() : D_800EA1C0 + 1); var_s0++) {
         func_800C5D04(var_s0);
         func_800C5E38(var_s0);
         func_800C6108(var_s0);
@@ -2994,7 +3006,7 @@ void func_800C9060(u8 playerId, u32 soundBits) {
 }
 
 void func_800C90F4(u8 playerId, u32 soundBits) {
-    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerId)) {
         func_800C92CC(playerId, soundBits - gPlayers[playerId].characterId * 0x10);
         return;
     }
@@ -3053,7 +3065,7 @@ void func_800C92CC(u8 playerId, u32 soundBits) {
 
 void func_800C94A4(u8 playerId) {
     u32 var_a0;
-    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerId)) {
         func_800C9A88(playerId);
         return;
     }
@@ -3148,7 +3160,7 @@ void func_800C94A4(u8 playerId) {
 }
 
 void func_800C97C4(u8 arg0) {
-    if (x360_audio_player() >= 0 && arg0 != x360_audio_player()) {
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(arg0)) {
         func_800C9D0C(arg0);
         return;
     }
@@ -3243,8 +3255,10 @@ void func_800C9A88(u8 playerId) {
 }
 
 void func_800C9D0C(u8 playerId) {
-    func_800C550C(
-        func_800C21E8(gPlayers[playerId].pos, gPlayers[playerId].characterId + SOUND_ARG_LOAD(0x31, 0x02, 0x80, 0x00)));
+    int i;for(i=0;i<D_800EA1C0+1;++i){
+        Vec3f *pos=func_800C21E8(gPlayers[playerId].pos,gPlayers[playerId].characterId+SOUND_ARG_LOAD(0x31,0x02,0x80,0x00));
+        if(pos){func_800C550C(pos);(*pos)[1]=100000.0f;}
+    }
 }
 
 void func_800C9D80(Vec3f position, Vec3f velocity, u32 soundBits) {
@@ -3324,9 +3338,15 @@ void func_800CA0E4(void) {
 }
 
 void func_800CA118(u8 arg0) {
-    if (x360_audio_player() >= 0 && arg0 != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(arg0)) return;
     D_800EA0EC[arg0] = 1;
     D_800E9EA4[arg0] = 1;
+    if(x360_audio_player()>=0){
+        int i,all=1;
+        for(i=0;i<x360_audio_count();++i)if(!D_800E9EA4[x360_audio_player()+i])all=0;
+        if(all){D_800EA0F0=1;func_800CA0E4();}
+        return;
+    }
     switch (D_800EA1C0) { /* irregular */
         case 0:
             D_800EA0F0 = 1;
@@ -3403,7 +3423,8 @@ void play_sequences(u16 first, u16 second) {
 }
 
 void func_800CA49C(u8 playerIndex) {
-    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerIndex)) return;
+    if(x360_audio_secondary(playerIndex)){func_800C9060(playerIndex,0x1900FF3A);return;}
     if (D_800EA108 == 0) {
         if (D_800EA1C0 >= 2) {
             func_800C9060(playerIndex, 0x1900FF3A);
@@ -3424,15 +3445,15 @@ void func_800CA49C(u8 playerIndex) {
 }
 
 void func_800CA59C(u8 playerId) {
-    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerId)) {
         func_800CA984(playerId);
         return;
     }
     if ((D_800EA0EC[playerId] == 0) && (D_800EA108 == 0)) {
         play_sound((gPlayers[playerId].characterId * 0x10) + 0x29008001, &D_800E9F7C[playerId].pos, playerId,
                    &D_800EA1D4, &D_800EA1D4, (s8*) &D_800E9F7C[playerId].unk_14);
-        D_800EA164 = 1;
-        if ((s32) D_800EA1C0 >= 2) {
+        if(!x360_audio_secondary(playerId)) D_800EA164 = 1;
+        if ((s32) D_800EA1C0 >= 2 || x360_audio_secondary(playerId)) {
             func_800C8F80(playerId, 0x0100FF2C);
         } else {
             func_800C3448(0x100100FF);
@@ -3455,7 +3476,7 @@ void func_800CA59C(u8 playerId) {
 }
 
 void func_800CA730(u8 playerIndex) {
-    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) {
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerIndex)) {
         func_800CAACC(playerIndex);
         return;
     }
@@ -3465,13 +3486,13 @@ void func_800CA730(u8 playerIndex) {
                        &D_800E9F7C[playerIndex].pos, playerIndex, &D_800EA1D4, &D_800EA1D4,
                        (s8*) &D_800E9F7C[playerIndex].unk_14);
             if (D_800EA10C[playerIndex] != 0) {
-                if ((s32) D_800EA1C0 >= 2) {
+                if ((s32) D_800EA1C0 >= 2 || x360_audio_secondary(playerIndex)) {
                     func_800C9018(playerIndex, SOUND_ARG_LOAD(0x01, 0x00, 0xFF, 0x2C));
                 } else {
                     D_800EA10C[playerIndex] = 0;
                     if (D_800EA104 != 0) {
                         func_800C9018(playerIndex, SOUND_ARG_LOAD(0x01, 0x00, 0xFF, 0x2C));
-                    } else if ((D_800EA10C[0] == 0) && (D_800EA10C[1] == 0)) {
+                    } else if (x360_audio_player()>=0 ? D_800EA10C[x360_audio_player()]==0 : ((D_800EA10C[0] == 0) && (D_800EA10C[1] == 0))) {
                         if (D_8018FC08 != 0) {
                             if (((u32) (gSequencePlayers[1].enabled)) == 0) {
                                 func_800C3608(1, 5);
@@ -3516,7 +3537,10 @@ void func_800CA984(u8 playerIndex) {
 
 void func_800CAACC(u8 playerId) {
     if ((u8) D_800EA108 == 0) {
-        func_800C5578(func_800C21E8(gPlayers[playerId].pos, SOUND_ITEM_STAR), SOUND_ITEM_STAR);
+        int i;for(i=0;i<D_800EA1C0+1;++i){
+            Vec3f *pos=func_800C21E8(gPlayers[playerId].pos,SOUND_ITEM_STAR);
+            if(pos){func_800C5578(pos,SOUND_ITEM_STAR);(*pos)[1]=100000.0f;}
+        }
     }
 }
 
@@ -3561,7 +3585,7 @@ void func_800CAC60(UNUSED u8 arg0) {
 
 void func_800CAD40(UNUSED s32 arg0) {
     if (D_800EA108 == 0) {
-        if (x360_audio_player() >= 0 ? D_800EA170[x360_audio_player()] == 0 : ((D_800EA170[0] == 0) && (D_800EA170[1] == 0) && (D_800EA170[2] == 0) && (D_800EA170[3] == 0))) {
+        if (x360_audio_player() >= 0 ? (D_800EA170[x360_audio_player()] == 0 && (x360_audio_count()==1 || D_800EA170[x360_audio_player()+1]==0)) : ((D_800EA170[0] == 0) && (D_800EA170[1] == 0) && (D_800EA170[2] == 0) && (D_800EA170[3] == 0))) {
             func_800C36C4(0, 1, 0x7FU, 0x19);
         }
         func_800C56F0(SOUND_ITEM_THUNDERBOLT);
@@ -3570,7 +3594,7 @@ void func_800CAD40(UNUSED s32 arg0) {
 }
 
 void func_800CADD0(u8 playerIndex, f32 arg1) {
-    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerIndex)) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerIndex]) {
             case 2:
@@ -3595,7 +3619,7 @@ void func_800CADD0(u8 playerIndex, f32 arg1) {
 }
 
 void func_800CAEC4(u8 playerId, f32 arg1) {
-    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerId)) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerId]) {
             case 2:
@@ -3620,7 +3644,7 @@ void func_800CAEC4(u8 playerId, f32 arg1) {
 }
 
 void func_800CAFC0(u8 playerIndex) {
-    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerIndex)) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerIndex]) {
             case 2:
@@ -3636,7 +3660,7 @@ void func_800CAFC0(u8 playerIndex) {
 }
 
 void func_800CB064(u8 playerIndex) {
-    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
+    if (x360_audio_player() >= 0 && !x360_audio_is_local(playerIndex)) return;
     if (D_800EA108 == 0) {
         if (D_800EA170[playerIndex] == 1) {
             if ((u8) D_800EA168 == 0) {

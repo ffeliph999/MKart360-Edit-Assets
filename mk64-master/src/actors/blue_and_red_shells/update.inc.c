@@ -198,6 +198,21 @@ void func_802B4104(struct ShellActor* shell) {
     }
 }
 
+/* Rank tables must agree before a red shell can acquire a racer ahead.
+ * Invalid/stale entries fall back to the normal first-place path following;
+ * in particular, never home back onto the player who fired the shell. */
+static s16 red_shell_target_ahead(s16 owner) {
+    s16 rank, target;
+    if (owner < 0 || owner >= NUM_PLAYERS) return -1;
+    rank = gPlayers[owner].currentRank;
+    if (rank <= 0 || rank >= NUM_PLAYERS) return -1;
+    target = gPlayerPositionLUT[rank - 1];
+    if (target < 0 || target >= NUM_PLAYERS || target == owner) return -1;
+    if (!(gPlayers[target].type & PLAYER_EXISTS) ||
+        gPlayers[target].currentRank != rank - 1) return -1;
+    return target;
+}
+
 /**
  * @brief Update the red and blue shell actors
  *
@@ -365,7 +380,8 @@ void update_actor_red_blue_shell(struct ShellActor* shell) {
                         shell->state = RED_SHELL_LOCK_ON;
                     }
                 } else {
-                    if (player->currentRank == 0) {
+                    shell->targetPlayer = red_shell_target_ahead(shell->playerId);
+                    if (shell->targetPlayer < 0) {
                         shell->state = TRIPLE_GREEN_SHELL;
                         shell->someTimer = 0x0258;
                         temp_v0 = gNearestPathPointByPlayerId[player - gPlayerOne] + 8;
@@ -381,11 +397,9 @@ void update_actor_red_blue_shell(struct ShellActor* shell) {
                             temp_v0 -= gSelectedPathCount;
                         }
                         shell->pathIndex = temp_v0;
-                        shell->targetPlayer = gPlayerPositionLUT[player->currentRank - 1];
                     } else {
                         shell->state = RED_SHELL_LOCK_ON;
                         shell->shellId = 1000.0f;
-                        shell->targetPlayer = gPlayerPositionLUT[player->currentRank - 1];
                     }
                 }
             }

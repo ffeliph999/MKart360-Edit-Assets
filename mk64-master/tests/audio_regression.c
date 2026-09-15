@@ -3,7 +3,7 @@
 #include <string.h>
 #include "audio/external.c"
 
-static int online, players, slot;
+static int online, players, slot,locals=1;
 s32 gGamestate = RACING;
 Player gPlayers[8];
 Camera cameras[8];
@@ -29,6 +29,7 @@ f32 func_80041724(f32 x, f32 z, u16 angle) {return z;}
 int x360_net_active(void) { return online; }
 int x360_net_player_count(void) { return players; }
 int x360_net_local_slot(void) { return slot; }
+int x360_net_local_count(void) {return locals;}
 int x360_net8_active(void) { return players > 4; }
 static int checks;
 #define CHECK(x) do { ++checks; if (!(x)) { printf("FAIL %d: %s\n",__LINE__,#x);exit(1); } } while(0)
@@ -98,6 +99,34 @@ int main(void) {
         func_800C1F8C();
         CHECK(gCopyCamera[0]==&cameras[local]);
     }
+    /* Every contiguous two-racer guest assignment, including P7/P8. */
+    for(count=3;count<=8;++count)for(local=1;local+1<count;++local){
+        online=1;players=count;slot=local;locals=2;gGamestate=RACING;D_800EA1C0=1;
+        func_800C2474();sound_init();
+        for(source=0;source<count;++source){
+            int own=source==local||source==local+1;sSoundRequestCount=0;
+            play_sound(0x0100FA28,&D_800E9F7C[source].pos,source,&D_800EA1D4,&D_800EA1D4,&D_800EA1DC);
+            CHECK(sSoundRequestCount==own);if(own)CHECK(sSoundRequests[0].cameraId==source-local);
+        }
+        func_800C1F8C();CHECK(gCopyCamera[0]==&cameras[local]);CHECK(gCopyCamera[1]==&cameras[local+1]);
+        CHECK(func_800C16E8(0,0,0)==0);CHECK(func_800C16E8(0,0,1)==127);
+        sSoundRequestCount=0;
+        for(source=0;source<count;++source)func_800C94A4(source);
+        CHECK(sSoundRequestCount==2+2*(count-2));
+        for(source=0;source<count;++source)if(source!=local&&source!=local+1){
+            u32 bits=gPlayers[source].characterId+0x31028000;
+            func_800C97C4(source);CHECK(func_800C21E8(gPlayers[source].pos,bits)==NULL);
+        }
+        /* Controller two gets local Star/lap cues without restarting TV music. */
+        D_800EA1E4=0;D_8018FC08=0;func_800CA49C(local+1);CHECK(D_800EA1E4==0);
+        func_800CA59C(local+1);CHECK(D_800EA10C[local+1]==1);CHECK(D_800EA164==0);CHECK(D_800EA1E4==0);
+        func_800CA730(local+1);CHECK(D_800EA10C[local+1]==0);CHECK(D_800EA1E4==0);
+        /* Finishing one local racer cannot silence the other local engine. */
+        gModeSelection=VERSUS;func_800CA118(local);CHECK(!D_800EA0F0);
+        func_800C76C0(local);CHECK(!D_800EA104);
+        func_800CA118(local+1);CHECK(D_800EA0F0);func_800C76C0(local+1);CHECK(D_800EA104);
+    }
+    locals=1;
     online=0;D_800EA1C0=3;
     for(source=0;source<4;++source) {
         sSoundRequestCount=0;

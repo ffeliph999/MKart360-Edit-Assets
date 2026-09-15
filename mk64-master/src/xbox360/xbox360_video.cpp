@@ -1,6 +1,7 @@
 #include <xtl.h>
 #include <d3d9.h>
 #include "xbox360/platform.h"
+#include "xbox360/frame_pacing.h"
 
 static IDirect3D9 *g_d3d;
 static IDirect3DDevice9 *g_dev;
@@ -80,7 +81,6 @@ extern "C" void x360_present_and_pace(void) {
     }
     LARGE_INTEGER now;QueryPerformanceCounter(&now);
     LONGLONG frame=g_clock_frequency.QuadPart/30;
-    if(!g_next_tick || now.QuadPart-g_next_tick>frame)g_next_tick=now.QuadPart;
-    g_next_tick+=frame;
+    g_next_tick=mkpacing::next_deadline(g_next_tick,now.QuadPart,frame);
     while(now.QuadPart<g_next_tick){Sleep(1);QueryPerformanceCounter(&now);}
 }

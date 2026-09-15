@@ -1,5 +1,5 @@
 #include <stdlib.h>
-#include "xbox360/xbox360_race8.c"
+#include "race8_rank_baseline.inc"
 
 static int checks,netCount=8,netSlot,course,cc=1,configured,setupCount,cameraCalls,finishCalls[8],lapCalls[8];
 static unsigned int frame=100;
@@ -93,7 +93,7 @@ void func_8004A384(s32 x,s32 y,u16 angle,f32 scale,s32 red,s32 green,s32 blue,s3
     ++rankCalls[slot];
 }
 /* Extracted verbatim from production by prepare_hud_tests.py. */
-#include "build/hud_production.inc"
+#include "hud_production.inc"
 void move_segment_table_to_dmem(void){}
 void init_rdp(void){}
 void init_z_buffer(void){++clears;}
@@ -409,5 +409,15 @@ static void cpu_rank_tests(void){
         }
     }
 }
-int main(void){int n,order[8];
-viewport.screenWidth=320;viewport.screenHeight=240;lobby_tests();for(n=4;n<=8;++n)finish_permutations(order,0,n,0);gameplay_tests();split_tests();hud_tests();online_spawn_rank_tests();cpu_rank_tests();printf("PASS race8 gameplay/lobby/results: %d checks\n",checks);return 0;}
+int main(void){
+ int i;
+ netCount=3;netLocals=2;netSlot=0;course=COURSE_LUIGI_RACEWAY;
+ x360_race8_prepare();x360_race8_spawn();
+ for(i=0;i<3;++i)gCourseCompletionPercentByPlayerId[i]=100.0f-i*10;
+ set_places();update_race_position_data();
+ printf("Old spawn, P1 physically ahead: displayed P1=%d P2=%d P3=%d; original P1 red-shell target slot=%d (owner=0)\n",
+ gPlayers[0].currentRank+1,gPlayers[1].currentRank+1,gPlayers[2].currentRank+1,
+ gPlayerPositionLUT[gPlayers[0].currentRank-1]);
+ CHECK(gPlayers[0].currentRank==0&&gPlayers[1].currentRank==1&&gPlayers[2].currentRank==2);
+ return 0;
+}

@@ -694,10 +694,23 @@ void render_actor_shell(Camera* camera, Mat4 matrix, struct ShellActor* shell) {
     f32 temp_f0 =
         distance_if_visible(camera->pos, shell->pos, camera->rot[1], 0, gCameraZoom[camera - camera1], 490000.0f);
     s32 maxObjectsReached;
-    if (temp_f0 < 0.0f) {
+    /*
+     * MK64_RACE8_HELD_ITEM_VISIBILITY_V5
+     *
+     * A held/orbiting shell is presentation-attached to a kart. race8's
+     * canonical camera remap can make the legacy coarse actor-frustum test
+     * reject that near-kart actor even though the kart itself is on screen.
+     * Do not disable normal culling for launched/free shells.
+     */
+    if (temp_f0 < 0.0f &&
+        !(x360_net8_active() &&
+          (shell->state == HELD_SHELL ||
+           shell->state == TRIPLE_GREEN_SHELL ||
+           shell->state == TRIPLE_RED_SHELL))) {
         actor_not_rendered(camera, (struct Actor*) shell);
         return;
     }
+    if (temp_f0 < 0.0f) temp_f0 = 0.0f;
 
     actor_rendered(camera, (struct Actor*) shell);
     if (temp_f0 < 40000.0f) {

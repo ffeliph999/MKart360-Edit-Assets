@@ -150,16 +150,16 @@ static void protocol_edges_8p() {
     CHECK(valid(packet, full));
 
     // START validation supports slots 1..7 and 8 players.
-    int n = header(packet, START, session, 4);
+    int n = header(packet, START, session, 5);
     packet[HEADER + 0] = 4;
     packet[HEADER + 1] = 8;
     packet[HEADER + 2] = 7;
-    packet[HEADER + 3] = 0;
+    packet[HEADER + 3] = 0;packet[HEADER + 4] = 0;
     CHECK(valid(packet, n));
 
     // A forged 4P signature cannot carry an eight-player session or source slot.
     lobby_capacity()=4;
-    n=header(packet,START,session,4);
+    n=header(packet,START,session,5);
     packet[HEADER]=4;packet[HEADER+1]=8;packet[HEADER+2]=7;
     CHECK(!valid(packet,n));
     n=header(packet,OFFER,session,24);packet[HEADER+20]=7;
@@ -183,7 +183,7 @@ static void protocol_edges_8p() {
             live[p].buttons^=1;
         }
     }
-    CHECK(diagnostic_step(17,live,3)==17);
+    CHECK(diagnostic_step(17,live,1)==17);
     CHECK(diagnostic_step(17,live,9)==17);
 
     // Each remote slot can be received without colliding with another slot.
@@ -210,13 +210,13 @@ static void deliver_one(NetQueue &q, Stats &stats, unsigned now,
 
     if (m.to == 0) {
         CHECK(m.from > 0 && m.from < players);
-        bool accepted = streams[0].receive_remote(m.from, m.data, m.n);
+        bool accepted = streams[0].receive_remote(m.from, m.data, m.n,streams[m.from].local_count);
         CHECK(accepted);
         // Exact Xbox host behavior: immediately relay accepted guest CLIENT_INPUT
         // unchanged to every other guest.
         if (m.data[5] == CLIENT_INPUT && players > 2) {
             for (unsigned dst = 1; dst < players; ++dst) {
-                if (dst == m.from) continue;
+                if (dst == m.from || !streams[dst].players) continue;
                 enqueue(q, stats, now, 0, dst, m.data, m.n, rtt, jitter, loss, burst);
                 ++stats.relayed;
             }
@@ -227,7 +227,7 @@ static void deliver_one(NetQueue &q, Stats &stats, unsigned now,
     if (m.data[5] == CLIENT_INPUT) {
         unsigned source = m.data[HEADER];
         CHECK(source < players && source != m.to);
-        CHECK(streams[m.to].receive_remote(source, m.data, m.n));
+        CHECK(streams[m.to].receive_remote(source, m.data, m.n,m.data[HEADER+3]+1));
     } else if (m.data[5] == FRAMESET) {
         CHECK(streams[m.to].receive_frameset(m.data, m.n));
     } else {
@@ -235,13 +235,13 @@ static void deliver_one(NetQueue &q, Stats &stats, unsigned now,
     }
 }
 
-static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
-    CHECK(players >= 4 && players <= 8);
-    lobby_capacity() = 8;
+static void run_sim(unsigned players, const Scenario &sc, unsigned seed,const unsigned *ownership=0,unsigned capacity=8) {
+    CHECK(players >= 2 && players <= 8);
+    lobby_capacity() = capacity;
     rng_state = seed;
     seq_counter = 0;
 
-    Stream4 streams[MAX_PLAYERS];
+    Stream4 streams[MAX_PLAYERS]={0};
     uint32_t state[MAX_PLAYERS];
     uint32_t sampled[MAX_PLAYERS];
     unsigned next_tick[MAX_PLAYERS];
@@ -259,7 +259,7 @@ static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
     const unsigned delay = input_delay_early_relay(budget, budget);
     CHECK(delay >= 2 && delay <= MAX_DELAY);
 
-    for (unsigned s = 0; s < players; ++s) streams[s].reset(delay, players, s);
+    for (unsigned s = 0; s < players; ++s) if(!ownership||ownership[s]) streams[s].reset(delay, players, s,ownership?ownership[s]:1);
 
     uint8_t session[16] = {0};
     uint8_t packet[MAX_PACKET];
@@ -276,11 +276,13 @@ static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
         bool done = true;
         for (unsigned s = 0; s < players; ++s) {
             Stream4 &st = streams[s];
+            if(!st.players)continue;
             CHECK(!st.fault);
             if (st.frame < sc.target_frames) done = false;
 
             if (now >= next_tick[s] && st.frame < sc.target_frames && sampled[s] != st.frame) {
-                st.sample_local(make_input(st.frame, s), state[s]);
+                Pad input[2];for(unsigned j=0;j<st.local_count;++j)input[j]=make_input(st.frame,s+j);
+                st.sample_locals(input, state[s]);
                 CHECK(!st.fault);
                 sampled[s] = st.frame;
                 last_send[s] = 0;
@@ -291,12 +293,14 @@ static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
                 const bool completion_changed = (host_sent_complete != st.latest_complete);
                 if (send_due || completion_changed) {
                     for (unsigned dst = 1; dst < players; ++dst) {
+                        if(!streams[dst].players)continue;
                         int n = st.client_packet(packet, session, dst);
                         CHECK(n > 0);
                         enqueue(q, stats, now, 0, dst, packet, n, sc.rtt, sc.jitter, sc.loss, sc.burst);
                         ++stats.client_inputs;
                     }
                     for (unsigned dst = 1; dst < players; ++dst) {
+                        if(!streams[dst].players)continue;
                         int n = st.frameset_packet(packet, session, dst);
                         CHECK(n > 0);
                         enqueue(q, stats, now, 0, dst, packet, n, sc.rtt, sc.jitter, sc.loss, sc.burst);
@@ -332,6 +336,7 @@ static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
     }
 
     for (unsigned s = 0; s < players; ++s) {
+        if(!streams[s].players)continue;
         CHECK(streams[s].frame == sc.target_frames);
         CHECK(state[s] == state[0]);
         CHECK(!streams[s].fault);

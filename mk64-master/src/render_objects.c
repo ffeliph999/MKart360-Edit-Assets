@@ -2362,6 +2362,29 @@ void func_8004E800(s32 playerId) {
     }
 }
 
+#ifdef XBOX360_PORT
+/*
+ * MK64_ONLINE_SINGLE_VIEW_HUD_RANK_V11
+ *
+ * Same native MK64 place graphic as func_8004E800(), but rank is supplied
+ * explicitly from synchronized Player.currentRank. This avoids legacy
+ * per-screen HUD bookkeeping that is only updated for native PLAYER_ONE in
+ * ordinary fullscreen online.
+ */
+void x360_render_online_place(s32 playerId, s32 rank) {
+    if (playerId < 0 || playerId >= NUM_PLAYERS) return;
+    if (rank < 0 || rank >= NUM_PLAYERS) return;
+
+    func_8004A384(playerHUD[playerId].rankX + playerHUD[playerId].slideRankX,
+                  playerHUD[playerId].rankY + playerHUD[playerId].slideRankY, 0U,
+                  playerHUD[playerId].rankScaling, 0x000000FF,
+                  D_800E55F8[rank], 0, 0x000000FF,
+                  common_texture_hud_place[rank], D_0D0068F0,
+                  0x00000080, 0x00000040, 0x00000080, 0x00000040);
+}
+#endif
+
+
 void func_8004E998(s32 playerId) {
     if (playerHUD[playerId].unk_81 != 0) {
         if (playerHUD[playerId].lapCount != 3) {

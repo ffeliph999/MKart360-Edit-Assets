@@ -142,11 +142,7 @@ static void convert_one(const XINPUT_STATE &s,PadCompat &p,int player){
 
 extern "C" void x360_read_controllers(void *pads_, int count) {
     x360_controls_load();
-    static bool loggingChord;
-    XINPUT_STATE chordState;memset(&chordState,0,sizeof(chordState));XInputGetState(0,&chordState);
-    const WORD chord=XINPUT_GAMEPAD_LEFT_THUMB|XINPUT_GAMEPAD_RIGHT_THUMB;
-    bool held=(chordState.Gamepad.wButtons&chord)==chord;
-    if(held&&!loggingChord)x360_set_logging(!x360_logging_enabled());loggingChord=held;
+    /* Logging is controlled by build policy/options, never gameplay buttons. */
     PadCompat *pads = (PadCompat*)pads_;
     for (int i = 0; i < count; ++i) {
         memset(&pads[i], 0, sizeof(PadCompat));
@@ -156,6 +152,34 @@ extern "C" void x360_read_controllers(void *pads_, int count) {
             convert_one(s, pads[i],i);
         } else {
             pads[i].err_no = 1;
+        }
+    }
+    /* MK64_SPLIT_PHYSICAL_REMAP_V2
+     * Netplay local player #2 is logical, not permanently tied to XInput user 1.
+     * The normal polling loop has already converted pads for each physical user.
+     * Find the first extra connected Xbox pad on users 1..3 and route that
+     * converted pad into pads[1] before netplay samples its local span.
+     * Offline input is unchanged. */
+    if(x360_net_active() && x360_net_local_count()>1 && count>1){
+        int extra=-1;
+        XINPUT_STATE probe;
+        for(DWORD user=1;user<4;++user){
+            memset(&probe,0,sizeof(probe));
+            if(XInputGetState(user,&probe)==ERROR_SUCCESS){
+                extra=(int)user;
+                break;
+            }
+        }
+        if(extra>=0){
+            if(extra!=1 && extra<count){
+                pads[1]=pads[extra];
+            }
+            pads[1].err_no=0;
+        }else{
+            pads[1].err_no=1;
+            pads[1].button=0;
+            pads[1].stick_x=0;
+            pads[1].stick_y=0;
         }
     }
     x360_net_controllers(pads_,count);

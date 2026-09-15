@@ -4,13 +4,13 @@
 #include <string.h>
 
 /*
- * MK64 Xbox 360 netplay protocol v3
+ * MK64 Xbox 360 netplay protocol v4
  *
  * Topology:
  *   P1 = host
- *   P2/P3/P4 = one remote Xbox each
+ *   Remaining racers = remote consoles with one or two contiguous slots
  *
- * Clients send only their own delayed input history to the host.
+ * Clients send only their reserved racers' delayed input history to the host.
  * The host relays authoritative all-player frame sets back to every client.
  * Every machine runs the same deterministic simulation in lockstep.
  *
@@ -19,9 +19,9 @@
 namespace mknet {
 
 enum {
-    VERSION=3,
-    BUILD=0xB3000914,
-    /* MK64_V3_2P_4P_EARLY_RELAY_LOW_LATENCY */
+    VERSION=4,
+    BUILD=0xB3100915,
+    /* B310: paired guest inputs and explicit local-view ownership. */
     HEADER=28,
     HISTORY=256,
     REDUNDANCY=24,
@@ -32,6 +32,10 @@ enum {
 
 /* Separate wire signatures prevent a 2-4 lobby accepting a 4-8 client. */
 inline unsigned &lobby_capacity(){static unsigned value=4;return value;}
+/* A two-controller reservation is atomic, including handshake restarts. */
+inline bool reservation_fits(unsigned used,unsigned previous,unsigned requested,unsigned capacity){
+    return used>=1 && used<=capacity && previous<used && requested>=1 && requested<=2 && used-previous+requested<=capacity;
+}
 inline const char *wire_magic(){return lobby_capacity()==8?"MK8P":"MK4P";}
 enum Type {
     HELLO=1,
@@ -43,7 +47,8 @@ enum Type {
     FRAMESET,
     GOODBYE,
     BOOT_READY,
-    BOOT_GO
+    BOOT_GO,
+    JOIN_REJECT
 };
 
 struct Pad {
@@ -86,17 +91,20 @@ inline bool valid(const uint8_t *p,int n) {
     const uint8_t *q=p+HEADER;
     switch(p[5]) {
     case HELLO:
+        return payload==1 && q[0]>=1 && q[0]<=2;
+    case JOIN_REJECT:
+        return payload==1 && q[0]==1;
     case GOODBYE:
     case BOOT_READY:
     case BOOT_GO:
         return payload==0;
     case OFFER:
     case READY:
-        return payload==24 && q[20]>=1 && q[20]<lobby_capacity();
+        return payload==24 && q[20]>=1 && q[22]<=1 && unsigned(q[20])+q[22]<lobby_capacity();
     case START:
-        return payload==4 && q[0]>=2 && q[0]<=MAX_DELAY &&
+        return payload==5 && q[3]<=1 && q[4]<=1 && (!q[3] || q[4]) && q[0]>=2 && q[0]<=MAX_DELAY &&
                q[1]>=2 && q[1]<=lobby_capacity() &&
-               q[2]>=1 && q[2]<q[1];
+               q[2]>=1 && q[2]+q[3]<q[1];
     case START_ACK:
         return payload==1 && q[0]>=1 && q[0]<lobby_capacity();
     case CLIENT_INPUT: {
@@ -104,8 +112,8 @@ inline bool valid(const uint8_t *p,int n) {
         unsigned slot=q[0],count=q[1];
         /* Slot 0 is valid in 2P when the host sends its early input
          * directly to the guest. */
-        return slot<lobby_capacity()&&count>0&&count<=REDUNDANCY&&
-               payload==16+4*int(count);
+        return q[3]<=1 && slot+q[3]<lobby_capacity()&&count>0&&count<=REDUNDANCY&&
+               payload==16+4*int(count)*int(q[3]+1);
     }
     case FRAMESET: {
         if(payload<24)return false;
@@ -126,6 +134,10 @@ struct BootBarrier {
     bool ready(unsigned slot){
         if(players<2||players>MAX_PLAYERS||slot==0||slot>=players)return false;
         mask|=1U<<slot;return true;
+    }
+    bool ready_span(unsigned slot,unsigned count){
+        if(count<1||count>2||slot==0||slot+count>players)return false;
+        for(unsigned i=0;i<count;++i)ready(slot+i);return true;
     }
     bool all_ready() const{return players>=2&&players<=MAX_PLAYERS&&mask==((1U<<players)-1);}
 };
@@ -181,15 +193,15 @@ struct Stream4 {
     HashSlot peer_hashes[MAX_PLAYERS][HISTORY];
     uint32_t frame,latest_local,latest_complete;
     uint32_t peer_frame[MAX_PLAYERS];
-    unsigned delay,players,local_slot;
+    unsigned delay,players,local_slot,local_count;
     bool fault;
 
-    void reset(unsigned d,unsigned p,unsigned slot) {
+    void reset(unsigned d,unsigned p,unsigned slot,unsigned locals=1) {
         memset(this,0,sizeof(*this));
-        if(d<2||d>MAX_DELAY||p<2||p>MAX_PLAYERS||slot>=p){fault=true;return;}
+        if(d<2||d>MAX_DELAY||p<2||p>MAX_PLAYERS||locals<1||locals>2||slot+locals>p){fault=true;return;}
         delay=d;
         players=p;
-        local_slot=slot;
+        local_slot=slot;local_count=locals;
         Pad zero={0,0,0};
         for(unsigned f=0;f<d;++f) {
             for(unsigned s=0;s<p;++s) {
@@ -218,11 +230,18 @@ struct Stream4 {
     }
 
     void sample_local(Pad p,uint32_t state) {
-        if(fault||local_slot>=players)return;
+        if(local_count!=1){fault=true;return;}
+        sample_locals(&p,state);
+    }
+
+    void sample_locals(const Pad *pads,uint32_t state) {
+        if(fault||local_slot+local_count>players)return;
         uint32_t f=frame+delay;
-        InputSlot &s=inputs[local_slot][f%HISTORY];
-        if(s.present&&s.frame==f&&!equal(s.pad,p)){fault=true;return;}
-        s.present=true;s.frame=f;s.pad=p;
+        for(unsigned i=0;i<local_count;++i){
+            InputSlot &s=inputs[local_slot+i][f%HISTORY];
+            if(s.present&&s.frame==f&&!equal(s.pad,pads[i])){fault=true;return;}
+            s.present=true;s.frame=f;s.pad=pads[i];
+        }
         latest_local=f;
 
         HashSlot &h=hashes[frame%HISTORY];
@@ -258,30 +277,33 @@ struct Stream4 {
         if(latest_local-first>=HISTORY){fault=true;return 0;}
         unsigned count=latest_local-first+1;
         if(count>REDUNDANCY)count=REDUNDANCY;
-        int n=header(p,CLIENT_INPUT,session,16+count*4);
+        int n=header(p,CLIENT_INPUT,session,16+count*4*local_count);
         uint8_t *q=p+HEADER;
         q[0]=uint8_t(local_slot);
         q[1]=uint8_t(count);
         const HashSlot &h=hashes[frame%HISTORY];
         q[2]=uint8_t((h.present&&h.frame==frame)?1:0);
-        q[3]=0;
+        q[3]=uint8_t(local_count-1);
         put32(q+4,first);
         put32(q+8,frame);
         put32(q+12,q[2]?h.value:0);
         for(unsigned i=0;i<count;++i) {
-            const InputSlot &in=inputs[local_slot][(first+i)%HISTORY];
-            encode_pad(q+16+i*4,in.pad);
+            for(unsigned j=0;j<local_count;++j){
+                const InputSlot &in=inputs[local_slot+j][(first+i)%HISTORY];
+                encode_pad(q+16+(i*local_count+j)*4,in.pad);
+            }
         }
         return n;
     }
 
-    bool receive_remote(unsigned expected_slot,const uint8_t *p,int n) {
+    bool receive_remote(unsigned expected_slot,const uint8_t *p,int n,unsigned owned_count=1) {
         /* Host receives guest input as before. In 2P the guest also accepts
          * slot 0 directly, avoiding the guest->host->guest relay path. */
-        if(fault||expected_slot>=players||expected_slot==local_slot)return false;
+        if(fault||owned_count<1||owned_count>2||expected_slot+owned_count>players||
+           (expected_slot<local_slot+local_count && expected_slot+owned_count>local_slot))return false;
         if(!valid(p,n)||p[5]!=CLIENT_INPUT)return false;
         const uint8_t *q=p+HEADER;
-        if(q[0]!=expected_slot)return false;
+        if(q[0]!=expected_slot||q[3]+1!=owned_count)return false;
 
         unsigned count=q[1];
         uint32_t first=get32(q+4),hf=get32(q+8);
@@ -290,10 +312,12 @@ struct Stream4 {
         for(unsigned i=0;i<count;++i) {
             uint32_t f=first+i;
             if(f<frame||f>frame+delay+REDUNDANCY)continue;
-            InputSlot &s=inputs[expected_slot][f%HISTORY];
-            Pad a=decode_pad(q+16+i*4);
-            if(s.present&&s.frame==f&&!equal(s.pad,a)){fault=true;return false;}
-            s.present=true;s.frame=f;s.pad=a;
+            for(unsigned j=0;j<owned_count;++j){
+                InputSlot &s=inputs[expected_slot+j][f%HISTORY];
+                Pad a=decode_pad(q+16+(i*owned_count+j)*4);
+                if(s.present&&s.frame==f&&!equal(s.pad,a)){fault=true;return false;}
+                s.present=true;s.frame=f;s.pad=a;
+            }
         }
 
         if(q[2]&&hf+HISTORY>frame) {
@@ -302,7 +326,8 @@ struct Stream4 {
             if(!local_hash_matches(expected_slot,hf))fault=true;
         }
 
-        if(hf>peer_frame[expected_slot])peer_frame[expected_slot]=hf;
+        for(unsigned j=0;j<owned_count;++j)
+            if(hf>peer_frame[expected_slot+j])peer_frame[expected_slot+j]=hf;
         update_complete();
         return !fault;
     }

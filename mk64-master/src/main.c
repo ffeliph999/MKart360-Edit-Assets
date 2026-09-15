@@ -932,7 +932,21 @@ void race_logic_loop(void) {
         }
     }
     func_802A4300();
+#ifdef XBOX360_PORT
+    /*
+     * MK64_ALL_ONLINE_HUD_AUDIO_PHASE_V9
+     * Never select native 2P/3P/4P HUD layout from total ONLINE player count.
+     * x360_race8_render_hud() maps the actual local slot(s) to a native 1P or
+     * horizontal-2P presentation.
+     */
+    if (x360_net_active()) {
+        x360_race8_render_hud();
+    } else {
+        func_800591B4();
+    }
+#else
     func_800591B4();
+#endif
     func_80093E20();
 #if DVDL
     display_dvdl();
@@ -1297,10 +1311,25 @@ void thread5_game_loop(UNUSED void* arg) {
     if(x360_net8_active()) x360_race8_prepare();
 
     while (true) {
-        if(gGlobalTimer<5)x360_log("MK64: loop audio update begins\n");
-        x360_progress(1);
-        func_800CB2C4();
-        if(gGlobalTimer<5)x360_log("MK64: loop audio update complete\n");
+        /*
+         * MK64_ALL_ONLINE_HUD_AUDIO_PHASE_V9
+         *
+         * Offline keeps the original ordering. Online defers this game-audio
+         * state update until immediately after read_controllers(), because that
+         * function is the lockstep frame barrier. This prevents a faster peer
+         * from advancing its next audio state before waiting for a slower
+         * split-screen peer.
+         */
+#ifdef XBOX360_PORT
+        if (!x360_net_active()) {
+#endif
+            if(gGlobalTimer<5)x360_log("MK64: loop audio update begins\n");
+            x360_progress(1);
+            func_800CB2C4();
+            if(gGlobalTimer<5)x360_log("MK64: loop audio update complete\n");
+#ifdef XBOX360_PORT
+        }
+#endif
 
         if(x360_net8_active()) x360_race8_service();
         // Update the gamestate if it has changed (racing, menus, credits, etc.).
@@ -1315,6 +1344,23 @@ void thread5_game_loop(UNUSED void* arg) {
         config_gfx_pool();
         x360_progress(3);
         read_controllers();
+
+#ifdef XBOX360_PORT
+        /*
+         * read_controllers() has now consumed the same complete network frame
+         * on every peer. Advance the game-owned audio state from this common
+         * phase point before race simulation/rendering begins.
+         *
+         * The separate 60 Hz audio output thread is intentionally untouched.
+         */
+        if (x360_net_active()) {
+            if(gGlobalTimer<5)x360_log("MK64: online post-barrier audio update begins\n");
+            x360_progress(1);
+            func_800CB2C4();
+            if(gGlobalTimer<5)x360_log("MK64: online post-barrier audio update complete\n");
+        }
+#endif
+
         if(gGlobalTimer<5)x360_log("MK64: game state handler begins\n");
         x360_progress(4);
         game_state_handler();

@@ -1,15 +1,15 @@
 {
-  "include/xbox360/netplay.h": "91c5472c6c000a848cd4c680f7ab1f00deb4231541b3fdc7c1bc485b0c06cda6",
-  "include/xbox360/netplay_protocol.h": "ad0f3c74548a847a4917f6110da127e4c0bdd5ad9f34523bd9da4672413f4f50",
-  "src/audio/external.c": "534a911461a1b88ebed5f7ad55e538ae850eb7a43fac85755dc9b3e316846ca4",
-  "src/main.c": "a14ed62983e17dbf3ecd3d7f213977ccedfb422842479ff088df000d3585fa12",
+  "include/xbox360/netplay.h": "48539e4227ce49ecb17c46b10f922a100cf8bbdd6b1c34907965abd660943f7d",
+  "include/xbox360/netplay_protocol.h": "96edcbb835548399609994b7c9b18a750f939abbc1782c0e5218b4e80b340899",
+  "src/audio/external.c": "052c9de0ede06f1ef46ed1ebd5854f96fe0dd9901700c46c45eca546fd3affed",
+  "src/main.c": "7912849ffd926efcea4235522025402bf69982805499b6005749d75a0f6502a7",
   "src/racing/memory.c": "3550ccf72cdc6c382c8a45a7227457cd10074449ad96e59b8850f5b44c9217d7",
   "src/xbox360/xbox360_asset_loader.cpp": "1d21071ae526bc287f27097f68d211d082c3d9c21b5ea64d46be207384d478c8",
-  "src/xbox360/xbox360_netplay.cpp": "3e8bf92181f0ef4b8744c22f4b8dfce3336e4acc6a0631ed309dd2774e3f7ffa",
-  "src/xbox360/xbox360_renderer.cpp": "a8cebcec232d1127d5c5764fa4c51511daeab4d9d21f240d7e3f26c82b8cfb66",
+  "src/xbox360/xbox360_netplay.cpp": "f73de46cc04ddc2dbe6e773f3e0af5691d265e076a362bd82bb64aecb1b38153",
+  "src/xbox360/xbox360_renderer.cpp": "e891b77e7d70aad8c5b3711bbef4c9a7b72b7a2b6549f83418dd3d369926b80d",
   "src/xbox360/xbox360_save_input.cpp": "596242adf2a33fe81fd682e355301a55452c44d4bd51b0023194a058221631db",
   "include/xbox360/netplay_view.h": "0b5a48ffa55cde71975f3f4830c92c2aca509d0ab14cf622bd811dc0795300f1",
-  "src/xbox360/xbox360_input.cpp": "b34f6e13c7187d685231f83187f81d2bd515154fa260bf86309df86259114f30",
-  "src/code_80057C60.c": "64c4093974fb53b974295ff73b7f78aa9113d071df3b04f50b0d109d50a0d5d6",
+  "src/xbox360/xbox360_input.cpp": "057843633677005ed7245100f02d7a9678dc7269e7b4dd620c5dd807f4a15621",
+  "src/code_80057C60.c": "85dab2f682cffe7fe64970bbce3de076425a8274925afc6e77fdd46f7db97ac7",
   "src/render_player.c": "3565e3956822a8fb493c4c18b40a72057ecabeb9d8966f8fd2595eb733323adb"
 }

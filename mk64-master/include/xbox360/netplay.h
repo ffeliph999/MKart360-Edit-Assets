@@ -23,6 +23,8 @@ int x360_net8_active(void);
 int x360_net_active(void);
 int x360_net_player_count(void);
 int x360_net_local_slot(void);
+int x360_net_local_count(void);
+int x360_net_is_local(int slot);
 unsigned int x360_net_frame(void);
 void x360_net_controllers(void *pads,int count);
 unsigned int x360_net_state_hash(void);

@@ -17,10 +17,16 @@ void render_actor_banana(Camera* camera, UNUSED Mat4 arg1, struct BananaActor* b
 
     f32 temp =
         distance_if_visible(camera->pos, banana->pos, camera->rot[1], 0, gCameraZoom[camera - camera1], 490000.0f);
-    if (temp < 0.0f) {
+    /* MK64_RACE8_HELD_ITEM_VISIBILITY_V5 */
+    if (temp < 0.0f &&
+        !(x360_net8_active() &&
+          (banana->state == HELD_BANANA ||
+           banana->state == FIRST_BANANA_BUNCH_BANANA ||
+           banana->state == BANANA_BUNCH_BANANA))) {
         actor_not_rendered(camera, (struct Actor*) banana);
         return;
     }
+    if (temp < 0.0f) temp = 0.0f;
 
     if ((banana->pos[1] > gCourseMaxY + 800.0f)) {
         actor_not_rendered(camera, (struct Actor*) banana);

@@ -59,10 +59,50 @@ extern s16 D_80164678[];
  * The game screen mode itself remains multiplayer for physics and input. */
 static s32 camera_view_mode(void) {
 #ifdef XBOX360_PORT
-    if (x360_net_active()) return SCREEN_MODE_1P;
+    /* MK64_ONLINE_CAMERA_MAP_CONTROLS_V8
+     * Camera tuning is presentation-only. A console with two local racers
+     * should use MK64's native horizontal-2P chase distance; a fullscreen
+     * guest keeps the normal 1P distance. */
+    if (x360_net_active()) {
+        return x360_net_local_count() > 1
+            ? SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL
+            : SCREEN_MODE_1P;
+    }
 #endif
     return gActiveScreenMode;
 }
+
+#ifdef XBOX360_PORT
+/*
+ * Online race8 camera collision repair.
+ *
+ * func_8001E45C/EA0C query camera collision but historically copy the desired
+ * XYZ directly into the camera. Mirror the proven response from func_8001E0C4
+ * so the chase camera is pushed back out of walls, ceilings and course faces.
+ */
+static void x360_online_camera_pushout(Camera *camera, f32 *x, f32 *y, f32 *z) {
+    if (!x360_net8_active()) return;
+
+    if (camera->collision.surfaceDistance[2] < 0.0f) {
+        *x += -camera->collision.orientationVector[0] * camera->collision.surfaceDistance[2];
+        *y += -camera->collision.orientationVector[1] * camera->collision.surfaceDistance[2] * 0.5f;
+        *z += -camera->collision.orientationVector[2] * camera->collision.surfaceDistance[2];
+    }
+    if (camera->collision.surfaceDistance[0] < 0.0f) {
+        camera->someBitFlags |= 4 | 2;
+        *x += -camera->collision.unk48[0] * camera->collision.surfaceDistance[0] * 1.5f;
+        *y += -camera->collision.unk48[1] * camera->collision.surfaceDistance[0];
+        *z += -camera->collision.unk48[2] * camera->collision.surfaceDistance[0] * 1.5f;
+    }
+    if (camera->collision.surfaceDistance[1] < 0.0f) {
+        camera->someBitFlags |= 4 | 2;
+        *x += -camera->collision.unk54[0] * camera->collision.surfaceDistance[1] * 1.5f;
+        *y += -camera->collision.unk54[1] * camera->collision.surfaceDistance[1];
+        *z += -camera->collision.unk54[2] * camera->collision.surfaceDistance[1] * 1.5f;
+    }
+}
+#endif
+
 
 void camera_init(f32 posX, f32 posY, f32 posZ, UNUSED s16 rot, u32 arg4, s32 cameraId) {
     Player* player = gPlayerOne;
@@ -778,6 +818,9 @@ void func_8001E45C(Camera* camera, Player* player, s8 arg2) {
     temp = 3;
     camera->someBitFlags &= 0xFFFB;
     check_bounding_collision(&camera->collision, temp, sp84, sp80, sp7C);
+#ifdef XBOX360_PORT
+    x360_online_camera_pushout(camera, &sp84, &sp80, &sp7C);
+#endif
 
     camera->pos[0] = sp84;
     camera->pos[1] = sp80;
@@ -813,6 +856,9 @@ void func_8001E8E8(Camera* camera, Player* player, s8 arg2) {
     camera->unk_2C = player->rotation[1];
     func_8001D53C(player, camera, sp5C, &sp7C, &sp78, &sp74, (s16) (s32) player->rotation[1], (s16) (s32) arg2);
     check_bounding_collision(&camera->collision, 5.0f, sp7C, sp78, sp74);
+#ifdef XBOX360_PORT
+    x360_online_camera_pushout(camera, &sp7C, &sp78, &sp74);
+#endif
     camera->lookAt[0] = sp5C[0];
     camera->lookAt[1] = sp5C[1];
     camera->lookAt[2] = sp5C[2];
@@ -904,6 +950,9 @@ void func_8001EA0C(Camera* camera, Player* player, s8 arg2) {
     temp = 3;
     camera->someBitFlags &= 0xFFFB;
     check_bounding_collision(&camera->collision, temp, sp84, sp80, sp7C);
+#ifdef XBOX360_PORT
+    x360_online_camera_pushout(camera, &sp84, &sp80, &sp7C);
+#endif
 
     camera->pos[0] = sp84;
     camera->pos[1] = sp80;
@@ -925,6 +974,10 @@ void func_8001EA0C(Camera* camera, Player* player, s8 arg2) {
 void func_8001EE98(Player* player, Camera* camera, s8 index) {
     s32 cameraIndex;
     if (x360_net8_active()) {
+        /* V8: race8 must still run MK64's C-button camera input.
+         * The old shortcut returned before func_8001A0A4(), so C-Up never
+         * reached func_80019C50() and D_80164678[] never changed. */
+        func_8001A0A4(&D_80152300[index], camera, player, index, index);
         if (gIsGamePaused == 0) {
             if (player->lakituProps & (LAKITU_RETRIEVAL | HELD_BY_LAKITU)) func_8001E8E8(camera, player, index);
             else if (gModeSelection == BATTLE) func_8001EA0C(camera, player, index);

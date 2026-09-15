@@ -4,12 +4,23 @@ extern "C" void x360_log(const char*);
 #include <stdarg.h>
 #include <stdlib.h>
 #include "xbox360/netplay.h"
+#include "xbox360/diagnostic_options.h"
 static volatile LONG logEnabled;
-extern "C" int x360_logging_enabled(void) {return InterlockedCompareExchange(&logEnabled,0,0)!=0;}
+extern "C" int x360_logging_enabled(void) {
+#if MK64_ENABLE_LOGGER_OPTIONS
+    return InterlockedCompareExchange(&logEnabled,0,0)!=0;
+#else
+    return 0;
+#endif
+}
 extern "C" void x360_set_logging(int enabled) {
+#if MK64_ENABLE_LOGGER_OPTIONS
     InterlockedExchange(&logEnabled,enabled?1:0);
     HANDLE f=CreateFileA("game:\\mk64-logging.cfg",GENERIC_WRITE,0,0,CREATE_ALWAYS,0,0);
     if(f!=INVALID_HANDLE_VALUE){char value=enabled?'1':'0';DWORD n;WriteFile(f,&value,1,&n,0);CloseHandle(f);}
+#else
+    (void)enabled;
+#endif
 }
 
 extern "C" int _Printf(char *(*emit)(char*,const char*,size_t),char *dst,const char *format,va_list args) {
@@ -62,6 +73,7 @@ static void boot_log_lock(void) {
     EnterCriticalSection(&bootLogLock);
 }
 extern "C" void x360_log_start(void) {
+#if MK64_ENABLE_LOGGER_OPTIONS
     HANDLE config=CreateFileA("game:\\mk64-logging.cfg",GENERIC_READ,FILE_SHARE_READ,0,OPEN_EXISTING,0,0);
     if(config!=INVALID_HANDLE_VALUE){char value=0;DWORD n=0;ReadFile(config,&value,1,&n,0);CloseHandle(config);InterlockedExchange(&logEnabled,n==1&&value=='1');}
 
@@ -71,6 +83,7 @@ extern "C" void x360_log_start(void) {
     LeaveCriticalSection(&bootLogLock);
     HANDLE watchdog=CreateThread(NULL,0,progress_watchdog,NULL,0,NULL);
     if(watchdog)CloseHandle(watchdog);
+#endif
 }
 extern "C" void x360_log(const char *message) {
     if(!x360_logging_enabled())return;

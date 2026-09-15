@@ -27,6 +27,8 @@ static uintptr_t rspSegments[16];
 #include "gfx_pc.h"
 #include "netplay.h"
 #include "netplay_view.h"
+#include "online_hud.h"
+int x360_gfx_online_hud = 0;
 extern "C" { extern int gGamestate,gActiveScreenMode,gPlayerCountSelection1; }
 #include "gfx_cc.h"
 #include "gfx_window_manager_api.h"
@@ -2078,7 +2080,7 @@ static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
     rdp.palette_bytes = sizeof(rdp.palette_data);
     ++rdp.palette_generation;
     rdp.palette_load_capture_hash =
-        (rdp.palette && rdp.palette_bytes && rdp.palette_bytes <= 512)
+        (x360_logging_enabled() && rdp.palette && rdp.palette_bytes && rdp.palette_bytes <= 512)
         ? x360_texture_hash(rdp.palette, rdp.palette_bytes) : 0;
 
     /* B17G6C diagnostic only: fingerprint palette RAM at LOADTLUT time during gGamestate==4.
@@ -2142,7 +2144,7 @@ static void gfx_dp_load_block(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t
     assert(size_bytes <= 4096 && "bug: too big texture");
     rdp.loaded_texture[load_bank].addr = rdp.texture_to_load.addr;
     rdp.loaded_texture[load_bank].load_capture_hash =
-        (rdp.loaded_texture[load_bank].addr && size_bytes)
+        (x360_logging_enabled() && rdp.loaded_texture[load_bank].addr && size_bytes)
         ? x360_texture_hash(rdp.loaded_texture[load_bank].addr, size_bytes) : 0;
 
     /* B17G11 COURSE-TMEM-BANK-RECORDER: Moo Moo dual-bank RGBA16 loads only. */
@@ -2383,7 +2385,7 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     lrxf = lrxf / (4.0f * HALF_SCREEN_WIDTH) - 1.0f;
     lryf = -(lryf / (4.0f * HALF_SCREEN_HEIGHT)) + 1.0f;
     mkview::Rect source;
-    const bool local=x360_net_active() && gGamestate==4 &&
+    const bool local=!x360_gfx_online_hud && x360_net_active() && !x360_net8_active() && gGamestate==4 &&
         gPlayerCountSelection1==x360_net_player_count() &&
         mkview::crop(gActiveScreenMode,x360_net_player_count(),x360_net_local_slot(),source);
 
@@ -2797,7 +2799,7 @@ static unsigned x360_b17g12_bad_geom_logs;
 static void x360_b17g12_log_bad_geom(Gfx *root, Gfx *cmd, const char *kind,
                                      unsigned a, unsigned b, unsigned c,
                                      unsigned d, unsigned e, unsigned f) {
-    if (x360_b17g12_bad_geom_logs >= 12 || root == NULL || cmd == NULL) return;
+    if (!x360_logging_enabled() || x360_b17g12_bad_geom_logs >= 12 || root == NULL || cmd == NULL) return;
 
     char m[512];
     const int index = (int)(cmd - root);
@@ -2962,37 +2964,50 @@ static void gfx_run_dl(Gfx* cmd) {
     Gfx *const dl_root = cmd;
     if (x360_is_quarantined_dl(dl_root)) return;
 
-    Gfx *const preflight_bad = x360_preflight_bad_vtx(dl_root);
+    /* Preflight is a diagnostic-only second walk. Runtime validation below
+     * still rejects invalid vertices/triangles with logging disabled. */
+    Gfx *const preflight_bad = x360_logging_enabled() ? x360_preflight_bad_vtx(dl_root) : NULL;
     if (preflight_bad != NULL) {
+        /* MK64_SPLITGFX1_BAD_VTX_CONTINUE
+         * Runtime validation below remains authoritative. */
         if (x360_bad_vtx_log_count < 16) {
-            char message[224];
+            char message[256];
             _snprintf(message,sizeof(message)-1,
-                      "MK64: B17G12 PREFLIGHT-BAD-GEOM root=%08X cmd=%08X w0=%08X raw=%08X\n",
+                      "MK64: SPLITGFX1 PREFLIGHT-NONFATAL root=%08X cmd=%08X w0=%08X raw=%08X\n",
                       (unsigned)(uintptr_t)dl_root,
                       (unsigned)(uintptr_t)preflight_bad,
                       (unsigned)preflight_bad->words.w0,
                       (unsigned)preflight_bad->words.w1);
             message[sizeof(message)-1]=0; x360_log(message);
         }
-        x360_quarantine_dl(dl_root, preflight_bad);
-        return;
     }
 
     const struct RDP rdp_entry = rdp;
     const size_t buf_entry_len = buf_vbo_len;
     const size_t buf_entry_tris = buf_vbo_num_tris;
+    bool x360_splitgfx_vertex_stream_valid = true; /* MK64_SPLITGFX1_BAD_VTX_CONTINUE */
+    static unsigned x360_splitgfx3_bad_tri_logs = 0; /* MK64_SPLITGFX3_BAD_TRI_ABORT_NO_QUARANTINE */
+    unsigned x360_splitgfx_logs = 0;
 
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
         int trace = opcode == G_SETTIMG ? 0 : opcode == G_SETTILE ? 1 :
             opcode == G_LOADBLOCK ? 2 : opcode == G_LOADTILE ? 3 : opcode == G_SETTILESIZE ? 4 : -1;
-        if (trace >= 0) {
+        if (trace >= 0 && x360_logging_enabled()) {
             x360_texture_command_address[trace] = (uintptr_t)cmd;
             x360_texture_commands[trace][0] = cmd->words.w0;
             x360_texture_commands[trace][1] = cmd->words.w1;
         }
 
         switch (opcode) {
+            case G_NOOP:
+                if (cmd->words.w1 == X360_ONLINE_HUD_BEGIN ||
+                    cmd->words.w1 == X360_ONLINE_HUD_END) {
+                    /* Flush with the OLD crop policy before changing phase. */
+                    gfx_flush();
+                    x360_gfx_online_hud = cmd->words.w1 == X360_ONLINE_HUD_BEGIN;
+                }
+                break;
             // RSP commands:
             case G_MTX:
 #ifdef F3DEX_GBI_2
@@ -3048,20 +3063,42 @@ static void gfx_run_dl(Gfx* cmd) {
                             (unsigned)(uintptr_t)vertices, 0, 0, 0);
                     }
                     if (x360_b17g12_range_ok &&
-                        x360_validate_vtx_pointer(cmd, n_vertices, dest_index, vertices)) {
-                        gfx_sp_vertex(n_vertices, dest_index, vertices);
-                    } else {
-                        /* Undo texture/render state changed by this corrupt list
-                         * before the poisoned vertex command was encountered. */
-                        buf_vbo_len = buf_entry_len;
-                        buf_vbo_num_tris = buf_entry_tris;
-                        rdp = rdp_entry;
-                        rdp.textures_changed[0] = true;
-                        rdp.textures_changed[1] = true;
-                        rdp.viewport_or_scissor_changed = true;
-                        x360_quarantine_dl(dl_root, cmd);
-                        return;
-                    }
+                                            x360_validate_vtx_pointer(cmd, n_vertices, dest_index, vertices)) {
+                                            if (x360_logging_enabled() && !x360_splitgfx_vertex_stream_valid && x360_splitgfx_logs < 8U) {
+                                                char message[224];
+                                                _snprintf(message,sizeof(message)-1,
+                                                          "MK64: SPLITGFX1 RECOVER-VTX root=%08X cmd=%08X n=%u dst=%u\n",
+                                                          (unsigned)(uintptr_t)dl_root,
+                                                          (unsigned)(uintptr_t)cmd,
+                                                          (unsigned)n_vertices,
+                                                          (unsigned)dest_index);
+                                                message[sizeof(message)-1]=0; x360_log(message);
+                                                ++x360_splitgfx_logs;
+                                            }
+                                            gfx_sp_vertex(n_vertices, dest_index, vertices);
+                                            x360_splitgfx_vertex_stream_valid = true;
+                                        } else {
+                                            /*
+                                             * Keep parsing the dynamic display list. TRI/QUAD draws
+                                             * are suppressed until another valid G_VTX establishes
+                                             * a safe vertex stream.
+                                             */
+                                            x360_splitgfx_vertex_stream_valid = false;
+                                            if (x360_logging_enabled() && x360_splitgfx_logs < 8U) {
+                                                char message[320];
+                                                _snprintf(message,sizeof(message)-1,
+                                                          "MK64: SPLITGFX1 SKIP-BAD-VTX root=%08X cmd=%08X "
+                                                          "w0=%08X raw=%08X n=%u dst=%u\n",
+                                                          (unsigned)(uintptr_t)dl_root,
+                                                          (unsigned)(uintptr_t)cmd,
+                                                          (unsigned)cmd->words.w0,
+                                                          (unsigned)cmd->words.w1,
+                                                          (unsigned)n_vertices,
+                                                          (unsigned)dest_index);
+                                                message[sizeof(message)-1]=0; x360_log(message);
+                                                ++x360_splitgfx_logs;
+                                            }
+                                        }
                 }
 #else
                 gfx_sp_vertex((C0(0, 16)) / sizeof(Vtx), C0(16, 4), (const Vtx *)seg_addr(cmd->words.w1));
@@ -3112,10 +3149,24 @@ static void gfx_run_dl(Gfx* cmd) {
                     rdp = rdp_entry;
                     rdp.textures_changed[0] = rdp.textures_changed[1] = true;
                     rdp.viewport_or_scissor_changed = true;
-                    x360_quarantine_dl(dl_root, cmd);
+                    if (x360_logging_enabled() && x360_splitgfx3_bad_tri_logs < 16) {
+                        char message[256];
+                        _snprintf(message, sizeof(message)-1,
+                                  "MK64: SPLITGFX3 ABORT-BAD-TRI1 root=%08X cmd=%08X w0=%08X w1=%08X idx=%u,%u,%u no-quarantine=1\n",
+                                  (unsigned)(uintptr_t)dl_root,
+                                  (unsigned)(uintptr_t)cmd,
+                                  (unsigned)cmd->words.w0,
+                                  (unsigned)cmd->words.w1,
+                                  a,b,c);
+                        message[sizeof(message)-1]=0;
+                        x360_log(message);
+                        ++x360_splitgfx3_bad_tri_logs;
+                    }
                     return;
                 }
-                gfx_sp_tri1((uint8_t)a, (uint8_t)b, (uint8_t)c);
+                if (x360_splitgfx_vertex_stream_valid) {
+                    gfx_sp_tri1((uint8_t)a, (uint8_t)b, (uint8_t)c);
+                }
                 break;
             }
 #if defined(F3DEX_GBI) || defined(F3DLP_GBI)
@@ -3132,11 +3183,25 @@ static void gfx_run_dl(Gfx* cmd) {
                     rdp = rdp_entry;
                     rdp.textures_changed[0] = rdp.textures_changed[1] = true;
                     rdp.viewport_or_scissor_changed = true;
-                    x360_quarantine_dl(dl_root, cmd);
+                    if (x360_logging_enabled() && x360_splitgfx3_bad_tri_logs < 16) {
+                        char message[320];
+                        _snprintf(message, sizeof(message)-1,
+                                  "MK64: SPLITGFX3 ABORT-BAD-TRI2 root=%08X cmd=%08X w0=%08X w1=%08X idx=%u,%u,%u/%u,%u,%u no-quarantine=1\n",
+                                  (unsigned)(uintptr_t)dl_root,
+                                  (unsigned)(uintptr_t)cmd,
+                                  (unsigned)cmd->words.w0,
+                                  (unsigned)cmd->words.w1,
+                                  a,b,c,d,e,f);
+                        message[sizeof(message)-1]=0;
+                        x360_log(message);
+                        ++x360_splitgfx3_bad_tri_logs;
+                    }
                     return;
                 }
-                gfx_sp_tri1((uint8_t)a, (uint8_t)b, (uint8_t)c);
-                gfx_sp_tri1((uint8_t)d, (uint8_t)e, (uint8_t)f);
+                if (x360_splitgfx_vertex_stream_valid) {
+                    gfx_sp_tri1((uint8_t)a, (uint8_t)b, (uint8_t)c);
+                    gfx_sp_tri1((uint8_t)d, (uint8_t)e, (uint8_t)f);
+                }
                 break;
             }
 #ifdef F3D_OLD
@@ -3149,8 +3214,10 @@ static void gfx_run_dl(Gfx* cmd) {
                 const unsigned v2 = C1(0, 8) / 2;
                 x360_last_tri_w0 = cmd->words.w0;
                 x360_last_tri_w1 = cmd->words.w1;
-                gfx_sp_tri1(v0, v1, v2);
-                gfx_sp_tri1(v0, v2, v3);
+                if (x360_splitgfx_vertex_stream_valid) {
+                    gfx_sp_tri1(v0, v1, v2);
+                    gfx_sp_tri1(v0, v2, v3);
+                }
                 static unsigned x360_b17g3_quad_logs = 0;
                 if (x360_b17g3_quad_logs++ < 8) {
                     char message[160];
@@ -3353,7 +3420,7 @@ void gfx_start_frame(void) {
      * At most four lines per GAME second. */
     {
         static int last_q = -1;
-        if (x360_logging_enabled() && x360_logging_enabled() && gGamestate == 4 && gCourseTimer >= 0.0f && gCourseTimer < 120.0f) {
+        if (x360_logging_enabled() && gGamestate == 4 && gCourseTimer >= 0.0f && gCourseTimer < 120.0f) {
             const int q = (int)(gCourseTimer * 4.0f);
             if (q != last_q) {
                 const unsigned t100 = (unsigned)(gCourseTimer * 100.0f);
@@ -3424,6 +3491,8 @@ void gfx_run(Gfx *commands) {
     x360_log("MK64: B17G12 geometry guard + corrupt-DL recorder enabled\n");
     x360_log("MK64: B17G13 HUD race-timer correlation enabled\n");
     x360_log("MK64: B17G14C terrain/road timer recorder enabled; kart ignored\n");
+    x360_log("MK64: SPLITGFX1 bad VTX skips dependent triangles; dynamic root continues\n");
+    x360_log("MK64: SPLITGFX3 bad TRI aborts current DL invocation; no persistent quarantine\n");
         x360_b17g2_logged = true;
     }
     memcpy(rspSegments,gSegmentTable,sizeof(rspSegments));
@@ -3443,8 +3512,10 @@ void gfx_run(Gfx *commands) {
     dropped_frame = false;
 
     gfx_rapi->start_frame();
+    x360_gfx_online_hud = 0;
     gfx_run_dl(commands);
     gfx_flush();
+    x360_gfx_online_hud = 0;
     gfx_rapi->end_frame();
     gfx_wapi->swap_buffers_begin();
 }

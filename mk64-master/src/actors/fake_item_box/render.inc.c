@@ -24,8 +24,10 @@ void render_actor_fake_item_box(Camera* camera, struct FakeItemBox* fakeItemBox)
     f32 temp_f2_2;
     f32 someMultiplier;
 
-    if (distance_if_visible(camera->pos, fakeItemBox->pos, camera->rot[1], 2500.0f, gCameraZoom[camera - camera1],
-                                1000000.0f) < 0) {
+    /* MK64_RACE8_HELD_ITEM_VISIBILITY_V5 */
+    if (!(x360_net8_active() && fakeItemBox->state == HELD_FAKE_ITEM_BOX) &&
+        distance_if_visible(camera->pos, fakeItemBox->pos, camera->rot[1], 2500.0f,
+                            gCameraZoom[camera - camera1], 1000000.0f) < 0) {
         actor_not_rendered(camera, (struct Actor*) fakeItemBox);
         return;
     }

@@ -14,6 +14,7 @@ extern "C" {
 #include "xbox360_shader_source.h"
 #include "xbox360/netplay.h"
 #include "xbox360/netplay_view.h"
+#include "xbox360/online_hud.h"
 extern "C" { extern int gGamestate,gActiveScreenMode,gPlayerCountSelection1; }
 static std::vector<float> local_view_vertices;
 static bool local_view_logged=false;
@@ -198,7 +199,7 @@ static void draw(float*buf,size_t len,size_t tris){
     mkview::Rect sc={active_scissor.x,active_scissor.y,active_scissor.width,active_scissor.height};
     const int online_players=x360_net_player_count();
     const int local_slot=x360_net_local_slot();
-    const bool local=x360_net_active() && gGamestate==4 &&
+    const bool local=!x360_gfx_online_hud && x360_net_active() && !x360_net8_active() && gGamestate==4 &&
         online_players>=2 && online_players<=4 &&
         gPlayerCountSelection1==online_players &&
         mkview::crop(gActiveScreenMode,online_players,local_slot,crop);

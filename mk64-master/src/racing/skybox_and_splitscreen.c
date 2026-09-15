@@ -494,7 +494,15 @@ void func_802A487C(Vtx* arg0, UNUSED struct UnkStruct_800DC5EC* arg1, UNUSED s32
  */
 static f32 race_view_aspect(void) {
 #ifdef XBOX360_PORT
-    if (x360_net_active() && gGamestate == 4) return 1.33333334f;
+    /* MK64_RACE8_LOCAL_SPLIT_ASPECT_V3
+     * Online simulation stays in the race8 path, but a two-local console
+     * presents native horizontal half-height views (320x120 => 8:3). */
+    if (x360_net_active() && gGamestate == 4) {
+        if (x360_net_local_count() > 1) {
+            return 2.66666675f;
+        }
+        return 1.33333334f;
+    }
 #endif
     return gScreenAspect;
 }
@@ -713,7 +721,7 @@ void func_802A51D4(void) {
         render_skybox((Vtx*) sSkyboxP1, D_800DC5EC, SCREEN_WIDTH, SCREEN_HEIGHT, &gCameraZoom[0]);
         func_80057FC4(3);
         func_802A487C((Vtx*) sSkyboxP1, D_800DC5EC, SCREEN_WIDTH, SCREEN_HEIGHT, &gCameraZoom[0]);
-        func_80093A30(3);
+        if(!x360_net8_active()) func_80093A30(3);
     }
 }
 // player 2 horizontal
@@ -730,7 +738,7 @@ void func_802A52BC(void) {
         render_skybox((Vtx*) sSkyboxP2, D_800DC5F0, SCREEN_WIDTH, SCREEN_HEIGHT, &gCameraZoom[1]);
         func_80057FC4(4);
         func_802A487C((Vtx*) sSkyboxP2, D_800DC5F0, SCREEN_WIDTH, SCREEN_HEIGHT, &gCameraZoom[1]);
-        func_80093A30(4);
+        if(!x360_net8_active()) func_80093A30(4);
     }
 }
 // player 1 solo
@@ -897,7 +905,13 @@ void render_player_one_1p_screen(void) {
     func_80021B0C();
     render_item_boxes(D_800DC5EC);
     render_player_snow_effect(RENDER_SCREEN_MODE_1P_PLAYER_ONE);
-    if(x360_net8_active()) return;
+    /*
+     * MK64_ONLINE_SINGLE_VIEW_HUD_RANK_V11
+     * All online modes draw their corrected local-slot HUD once at the
+     * end-of-frame via x360_race8_render_hud(). Do not also draw the stock
+     * PLAYER_ONE HUD here in ordinary non-split 2-4P online.
+     */
+    if(x360_net_active()) return;
     func_80058BF4();
     if (D_800DC5B8 != 0) {
         func_80058C20(RENDER_SCREEN_MODE_1P_PLAYER_ONE);
@@ -1092,6 +1106,7 @@ void render_player_one_2p_screen_horizontal(void) {
     func_80021B0C();
     render_item_boxes(D_800DC5EC);
     render_player_snow_effect(RENDER_SCREEN_MODE_2P_VERTICAL_PLAYER_ONE);
+    if(x360_net8_active()){D_8015F788+=1;return;}
     func_80058BF4();
     if (D_800DC5B8 != 0) {
         func_80058C20(RENDER_SCREEN_MODE_2P_VERTICAL_PLAYER_ONE);
@@ -1155,6 +1170,7 @@ void render_player_two_2p_screen_horizontal(void) {
     func_80021C78();
     render_item_boxes(D_800DC5F0);
     render_player_snow_effect(RENDER_SCREEN_MODE_2P_VERTICAL_PLAYER_TWO);
+    if(x360_net8_active()){D_8015F788+=1;return;}
     func_80058BF4();
     if (D_800DC5B8 != 0) {
         func_80058C20(RENDER_SCREEN_MODE_2P_VERTICAL_PLAYER_TWO);

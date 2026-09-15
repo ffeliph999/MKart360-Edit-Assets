@@ -1936,7 +1936,7 @@ void func_8000B140(s32 playerId) {
 
 void func_8000F0E0(void) {
     s32 i;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 8; i++) /* MK64_ONLINE_CAMERA_MAP_CONTROLS_V8_RESET8 */ {
         D_80164670[i] = 0;
         D_80164678[i] = 0;
     }

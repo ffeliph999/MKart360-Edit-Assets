@@ -1311,6 +1311,33 @@ void func_8003D080(void) {
             func_8003CD98(gPlayerSix, camera1, 5, 0);
             func_8003CD98(gPlayerSeven, camera1, 6, 0);
             func_8003CD98(gPlayerEight, camera1, 7, 0);
+
+#ifdef XBOX360_PORT
+            /*
+             * MK64_RACE8_SPLIT_KART_INIT_V4
+             *
+             * race8 deliberately keeps gActiveScreenMode at 1P for shared
+             * simulation, but a console with two local controllers presents
+             * a real second horizontal view. Native 2P normally initializes
+             * the kart DMA/decode buffers, palettes and animation selectors
+             * for screen 1 here. Without this, the bottom view reads an
+             * uninitialized D_802BFB80/gPlayerPalettesList screen-1 slot and
+             * drivers disappear even though track/particles render.
+             *
+             * Mirror the native 2P initialization only when this Xbox owns
+             * two local network racers. Simulation/player count is unchanged.
+             */
+            if (x360_net8_active() && x360_net_local_count() > 1) {
+                func_8003CD98(gPlayerOneCopy, camera2, 0, 1);
+                func_8003CD98(gPlayerTwo, camera2, 1, 1);
+                func_8003CD98(gPlayerThree, camera2, 2, 1);
+                func_8003CD98(gPlayerFour, camera2, 3, 1);
+                func_8003CD98(gPlayerFive, camera2, 4, 1);
+                func_8003CD98(gPlayerSix, camera2, 5, 1);
+                func_8003CD98(gPlayerSeven, camera2, 6, 1);
+                func_8003CD98(gPlayerEight, camera2, 7, 1);
+            }
+#endif
             break;
 
         case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:

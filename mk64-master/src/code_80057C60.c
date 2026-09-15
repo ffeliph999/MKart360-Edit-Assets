@@ -10,8 +10,8 @@
 
 /*
  * Online fullscreen presentation still executes MK64's native split-screen
- * render passes. Only one native view is actually presented on each Xbox,
- * so do not spend the finite mtxEffect pool on hidden native views.
+ * render passes. Each Xbox presents one native view per local controller,
+ * so spend the finite mtxEffect pool only on presentation views 0/1.
  *
  * This is RENDER-ONLY. Particle creation/update, physics, RNG and netplay
  * state remain identical on every console.
@@ -20,9 +20,20 @@
  * is a separate presentation integration step.
  */
 #define X360_SHARED_EFFECTS x360_net_active()
+/*
+ * MK64_ONLINE_GUEST_EFFECTS_RANK_HUD_V10
+ *
+ * Effect screen IDs have TWO online meanings:
+ *   - race8/split presentation: canonical local view 0, or views 0/1
+ *   - legacy plain 2-4P: native screen ID is the logical network slot
+ *
+ * Select the mapping that matches the renderer actually producing this frame.
+ * This is render-only; particle simulation/RNG/physics remain untouched.
+ */
 #define X360_EFFECT_SCREEN_VISIBLE(screenId) \
     (!x360_net_active() || x360_net_player_count() < 2 || x360_net_player_count() > 4 || \
-     (screenId) == x360_net_local_slot())
+     (x360_net8_active() ? ((screenId) < x360_net_local_count()) \
+                         : ((screenId) == x360_net_local_slot())))
 #define X360_SHARED_EFFECTS_LOCAL_VIEW \
     (X360_SHARED_EFFECTS && x360_net_player_count() >= 2 && x360_net_player_count() <= 4)
 #else
@@ -488,6 +499,75 @@ void func_80057DD0(void) {
     }
 }
 
+#ifdef XBOX360_PORT
+/* Clouds are screen-space sprites. Expanding a native split viewport also
+ * expands its half-height cloud projection and offsets. Use the 1P layout
+ * for each fullscreen console, and a half-height layout only for two LOCAL
+ * views. Read the course data directly: native 3P/4P does not allocate clouds.
+ * No object/animation/RNG state is changed by this presentation pass. */
+static s32 x360_draw_online_clouds(u32 screenId) {
+    static Mtx projection[2];
+    CloudData *clouds, *angles;
+    struct UnkStruct_800DC5EC *view;
+    s32 cameraId, i, split, height, lastTexture = -1;
+    f32 factor;
+    s16 field, limit, angle, x, y;
+
+    if (!x360_net_active() || gGamestate != RACING) return 0;
+    switch (gCurrentCourseId) {
+        case COURSE_MARIO_RACEWAY: clouds = gKalimariDesertClouds; break;
+        case COURSE_LUIGI_RACEWAY: clouds = gLuigiRacewayClouds; break;
+        case COURSE_YOSHI_VALLEY:
+        case COURSE_MOO_MOO_FARM: clouds = gYoshiValleyMooMooFarmClouds; break;
+        case COURSE_KOOPA_BEACH: clouds = gKoopaTroopaBeachClouds; break;
+        case COURSE_ROYAL_RACEWAY: clouds = gRoyalRacewayClouds; break;
+        case COURSE_KALAMARI_DESERT: clouds = gKalimariDesertClouds; break;
+        case COURSE_SHERBET_LAND: clouds = gSherbetLandClouds; break;
+        default: return 0; /* Preserve the snow/star paths. */
+    }
+    /* Match the stock Mario Raceway initialization/display table pairing. */
+    angles = gCurrentCourseId == COURSE_MARIO_RACEWAY ? gLuigiRacewayClouds : clouds;
+    switch (screenId) {
+        case 0: case 1: case 3: case 8: cameraId = 0; view = D_800DC5EC; break;
+        case 2: case 4: case 9: cameraId = 1; view = D_800DC5F0; break;
+        case 10: cameraId = 2; view = D_800DC5F4; break;
+        case 11: cameraId = 3; view = D_800DC5F8; break;
+        default: return 1;
+    }
+    /* Legacy views use network slot IDs; race8 remaps local cameras to 0/1. */
+    if (x360_net8_active()) {
+        if (cameraId >= x360_net_local_count()) return 1;
+    } else if (cameraId != x360_net_local_slot()) return 1;
+    if (!D_8018D220) return 1;
+
+    split = x360_net_local_count() > 1;
+    height = split ? 120 : 240;
+    guOrtho(&projection[split], 0.0f, 320.0f, (f32) height, 0.0f, -1.0f, 1.0f, 1.0f);
+    gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(&projection[split]),
+              G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    /* The stock update stores this sum in a signed 16-bit field. */
+    field = (s16) (gCameraZoom[cameraId] + 40.0f);
+    limit = (s16) (((field / 2) * DEGREES(1)) + DEGREES(10));
+    factor = 1.7578125 / field;
+    gSPDisplayList(gDisplayListHead++, D_0D007A60);
+    func_8004B6C4(255, 255, 255);
+    for (i = 0; clouds[i].rotY != 0xFFFF && angles[i].rotY != 0xFFFF; ++i) {
+        angle = view->camera->rot[1] + angles[i].rotY;
+        if (angle < -limit || angle > limit) continue;
+        x = (s16) (160 + factor * angle);
+        y = (s16) ((240 - view->cameraHeight - (s16) clouds[i].posY) / (split ? 2 : 1));
+        if (lastTexture != clouds[i].subType) {
+            lastTexture = clouds[i].subType;
+            func_80044DA0((u8*) &D_8018D220[lastTexture], 64, 32);
+        }
+        func_80042330(x, y, 0, (f32) clouds[i].scalePercent / 100.0);
+        gSPVertex(gDisplayListHead++, D_0D005FB0, 4, 0);
+        gSPDisplayList(gDisplayListHead++, common_rectangle_display);
+    }
+    return 1;
+}
+#endif
+
 void func_80057FC4(u32 arg0) {
     UNUSED Gfx* temp_v1;
 
@@ -500,6 +580,9 @@ void func_80057FC4(u32 arg0) {
     if ((D_801657C8 != 0)) {
         return;
     }
+#ifdef XBOX360_PORT
+    if (x360_draw_online_clouds(arg0)) return;
+#endif
 
     switch (arg0) {
         case 0:
@@ -908,6 +991,10 @@ void func_80058C20(u32 arg0) {
 }
 
 void render_hud(u32 arg0) {
+#ifdef XBOX360_PORT
+    /* All online HUDs are emitted once, from local slots at frame end. */
+    if (x360_net_active()) return;
+#endif
 
     D_8018D21C = arg0;
     gSPDisplayList(gDisplayListHead++, &D_0D0076F8);
@@ -1346,6 +1433,10 @@ void func_80059D00(void) {
                 func_8005D0FC(i);
                 if(!gDemoMode) func_8007AA44(i);
             }
+            /* Both sky object sets exist in the 1P allocation too. Advance them
+             * from canonical cameras on every machine, independent of views. */
+            course_update_clouds(0);
+            course_update_clouds(2);
             update_object();
         } else switch (gScreenModeSelection) {
             case SCREEN_MODE_1P:
@@ -1527,8 +1618,15 @@ void func_8005A380(void) {
     }
 }
 
+/* MK64_ONLINE_CAMERA_MAP_CONTROLS_V8 */
 void func_8005A3C0(void) {
     bool b = false;
+#ifdef XBOX360_PORT
+    /* V8: race8 owns per-player R-C minimap toggles.
+     * Otherwise a 3-player network race is treated as native 3P even when
+     * this machine is a single fullscreen P3 guest. */
+    if (x360_net8_active()) return;
+#endif
     if ((gGamestate != ENDING) && (gGamestate != CREDITS_SEQUENCE) && !D_8018D204) {
         switch (gPlayerCountSelection1) {
             case 1:
