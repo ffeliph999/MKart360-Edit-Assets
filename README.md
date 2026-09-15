@@ -7,10 +7,11 @@ This version includes Xbox 360 build support, 2-4 player console-to-console mult
 ## Features
 
 - Native Xbox 360 project/source files
-- 2, 3, and 4 player console-to-console multiplayer
+- 2, 3, and 4 player console-to-console multiplayer (5-8 players beta)
 - LAN and direct Internet host/join
 - Joining games through Party chat invites
-- Per-console fullscreen views for P1/P2/P3/P4
+- Per console fullscreen views for P1/P2/P3/P4 + P5-P8 
+- Per console audio system so each player gets their own sounds so it doesn't sound like you're playing on 1 console
 - 16:9 and centered 4:3 display modes
 - Controller rebinding/tuning options
 
