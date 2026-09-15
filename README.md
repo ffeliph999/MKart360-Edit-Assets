@@ -2,7 +2,7 @@
 
 An Xbox 360 port of Mario Kart 64 based on the [n64decomp/mk64](https://github.com/n64decomp/mk64) decompilation project.
 
-This version includes Xbox 360 build support, 2-4 player console-to-console multiplayer, Xbox LIVE Party-assisted host discovery, and per-console fullscreen player views.
+This version includes Xbox 360 build support, 2-4 player console-to-console multiplayer / 5-8 players beta, joining through Party Chat Invites, and per-console fullscreen player views ect...
 
 ## Features
 
@@ -52,7 +52,7 @@ mk64-master\baserom.us.z64
 - Python 3
 - Xbox 360 SDK / Visual Studio Xbox 360 build tools
 - Your own US Mario Kart 64 ROM
-- An Xbox 360 capable of running homebrew XEX files
+- An Xbox 360 capable of running homebrew XEX files or latest Xenia Netplay version with xbox live turned on
 
 ## Preparing the assets
 
