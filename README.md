@@ -16,6 +16,10 @@ This version includes Xbox 360 build support, 2-4 player console-to-console mult
 - Controller rebinding/tuning options
 
 
+##BUGS
+
+- crashing after finishing a GP then start another GP
+
 ## Fixed
 
 -audio cut outs
