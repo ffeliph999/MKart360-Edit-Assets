@@ -1,4 +1,5 @@
 #include "xbox360/netplay_protocol.h"
+#include "xbox360/netplay_diagnostic.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,6 +157,35 @@ static void protocol_edges_8p() {
     packet[HEADER + 3] = 0;
     CHECK(valid(packet, n));
 
+    // A forged 4P signature cannot carry an eight-player session or source slot.
+    lobby_capacity()=4;
+    n=header(packet,START,session,4);
+    packet[HEADER]=4;packet[HEADER+1]=8;packet[HEADER+2]=7;
+    CHECK(!valid(packet,n));
+    n=header(packet,OFFER,session,24);packet[HEADER+20]=7;
+    CHECK(!valid(packet,n));
+    n=header(packet,START_ACK,session,1);packet[HEADER]=7;
+    CHECK(!valid(packet,n));
+    n=header(packet,CLIENT_INPUT,session,20);packet[HEADER]=7;packet[HEADER+1]=1;
+    CHECK(!valid(packet,n));
+    n=header(packet,FRAMESET,session,48);packet[HEADER]=8;packet[HEADER+1]=1;
+    CHECK(!valid(packet,n));
+    lobby_capacity()=8;
+    Pad live[MAX_PLAYERS];
+    for(unsigned p=0;p<MAX_PLAYERS;++p)live[p]=make_input(22,p);
+    for(unsigned count=4;count<=8;++count){
+        uint32_t expected=2166136261U;
+        for(unsigned p=0;p<count;++p)expected=hash_step(expected,live[p]);
+        CHECK(diagnostic_step(2166136261U,live,count)==expected);
+        for(unsigned p=0;p<count;++p){
+            live[p].buttons^=1;
+            CHECK(diagnostic_step(2166136261U,live,count)!=expected);
+            live[p].buttons^=1;
+        }
+    }
+    CHECK(diagnostic_step(17,live,3)==17);
+    CHECK(diagnostic_step(17,live,9)==17);
+
     // Each remote slot can be received without colliding with another slot.
     Stream4 h;
     h.reset(4, 8, 0);
@@ -291,8 +321,9 @@ static void run_sim(unsigned players, const Scenario &sc, unsigned seed) {
                     Pad expected = {0,0,0};
                     if (f >= delay) expected = make_input(f - delay, p);
                     CHECK(equal(pads[p], expected));
-                    state[s] = hash_step(state[s], pads[p]);
+
                 }
+                state[s] = diagnostic_step(state[s], pads, players);
                 next_tick[s] = now + 33u;
             }
         }

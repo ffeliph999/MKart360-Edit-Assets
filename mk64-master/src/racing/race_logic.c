@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <common_structs.h>
@@ -24,6 +25,9 @@
 #include "math.h"
 #include "menus.h"
 #include "seq_ids.h"
+#ifdef XBOX360_PORT
+#include "xbox360/netplay.h"
+#endif
 
 #pragma intrinsic(sqrtf)
 
@@ -482,7 +486,7 @@ void play_music_for_current_track(s32 track) {
         case COURSE_BIG_DONUT:
             play_sequence(SEQ_TRACK_BATTLE);
             break;
-		
+
 #ifdef AVOID_UB
 		default: //! @BUG: No default case. Enable AVOID_UB for custom tracks.
 		    play_sequence(SEQ_TRACK_RACEWAY);
@@ -601,11 +605,11 @@ void func_8028EF28(void) {
                                 if (currentPosition == 1) {
                                     gRaceState = RACE_DONE; // triggers results screen
 
-                                 /* This messes with the loop index by setting it to the index of the last player. 
+                                 /* This messes with the loop index by setting it to the index of the last player.
                                     But, because versus always gives the player with the lower slot/port number
                                     the advantage if 2 players finish at the same time,  it can only skip finished
                                     players who do not need more processing. It can run the same index twice, but
-                                    any player who finished this frame already had their lap count updated, so 
+                                    any player who finished this frame already had their lap count updated, so
                                     nothing will happen */
                                     playerId = gPlayerPositionLUT[2];
                                     *(nmi_gVersusResults3P + playerId * 3 + 2) += 1;
@@ -640,7 +644,11 @@ void func_8028EF28(void) {
                     if ((player->type & 0x100) != 0) {
                         return;
                     }
-                    if ((D_802BA032 & 0x4000) == 0) {
+                    if ((D_802BA032 & 0x4000) == 0
+#ifdef XBOX360_PORT
+                        || x360_net_active()
+#endif
+                    ) {
                         D_802BA032 |= 0x4000;
                         func_800CA49C((u8) playerId);
                     }
@@ -807,6 +815,7 @@ void func_8028F914(void) {
 
 void func_8028F970(void) {
     s32 i;
+    if(x360_net8_active()) return; /* Dedicated synchronized pause/results controls. */
 
     if (D_8015F890) {
         return;
@@ -923,6 +932,7 @@ void func_8028FCBC(void) {
     s32 i;
     u32 phi_v0_4;
 
+    if(x360_net8_active() && x360_race8_rules()) return;
     if (gDemoUseController) {
         end_demo_update();
     }

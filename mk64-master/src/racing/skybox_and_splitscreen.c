@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <PR/gbi.h>
@@ -638,6 +639,10 @@ void set_perspective_and_aspect_ratio(void) {
 }
 
 void func_802A4EF4(void) {
+    if(x360_net8_active()) {
+        int i;for(i=0;i<x360_net_player_count();++i)func_8001F394(&gPlayers[i],&gCameraZoom[i]);
+        return;
+    }
     switch (gActiveScreenMode) {
         case SCREEN_MODE_1P:
             func_8001F394(gPlayerOne, &gCameraZoom[0]);
@@ -746,7 +751,7 @@ void func_802A53A4(void) {
             func_80057FC4(0);
         }
         func_802A487C((Vtx*) sSkyboxP1, D_800DC5EC, 0x140, 0xF0, &gCameraZoom[0]);
-        func_80093A30(0);
+        if(!x360_net8_active()) func_80093A30(0);
     }
 }
 // player 1 3p 4p
@@ -892,6 +897,7 @@ void render_player_one_1p_screen(void) {
     func_80021B0C();
     render_item_boxes(D_800DC5EC);
     render_player_snow_effect(RENDER_SCREEN_MODE_1P_PLAYER_ONE);
+    if(x360_net8_active()) return;
     func_80058BF4();
     if (D_800DC5B8 != 0) {
         func_80058C20(RENDER_SCREEN_MODE_1P_PLAYER_ONE);

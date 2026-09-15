@@ -20,7 +20,7 @@ namespace mknet {
 
 enum {
     VERSION=3,
-    BUILD=0xB2700914,
+    BUILD=0xB3000914,
     /* MK64_V3_2P_4P_EARLY_RELAY_LOW_LATENCY */
     HEADER=28,
     HISTORY=256,
@@ -92,25 +92,25 @@ inline bool valid(const uint8_t *p,int n) {
         return payload==0;
     case OFFER:
     case READY:
-        return payload==24 && q[20]>=1 && q[20]<MAX_PLAYERS;
+        return payload==24 && q[20]>=1 && q[20]<lobby_capacity();
     case START:
         return payload==4 && q[0]>=2 && q[0]<=MAX_DELAY &&
-               q[1]>=2 && q[1]<=MAX_PLAYERS &&
+               q[1]>=2 && q[1]<=lobby_capacity() &&
                q[2]>=1 && q[2]<q[1];
     case START_ACK:
-        return payload==1 && q[0]>=1 && q[0]<MAX_PLAYERS;
+        return payload==1 && q[0]>=1 && q[0]<lobby_capacity();
     case CLIENT_INPUT: {
         if(payload<20)return false;
         unsigned slot=q[0],count=q[1];
         /* Slot 0 is valid in 2P when the host sends its early input
          * directly to the guest. */
-        return slot<MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
+        return slot<lobby_capacity()&&count>0&&count<=REDUNDANCY&&
                payload==16+4*int(count);
     }
     case FRAMESET: {
         if(payload<24)return false;
         unsigned players=q[0],count=q[1];
-        return players>=2&&players<=MAX_PLAYERS&&count>0&&count<=REDUNDANCY&&
+        return players>=2&&players<=lobby_capacity()&&count>0&&count<=REDUNDANCY&&
                payload==16+4*int(players)*int(count);
     }
     default:

@@ -45,6 +45,15 @@ static void views(){
             for(int other=0;other<players;++other)if(other!=slot){mkview::Rect peer,intersection;CHECK(mkview::crop(mode,players,other,peer));CHECK(!mkview::intersect(crop,peer,intersection));}
         }
     }
+    /* X360_CRT_480I_NATIVE_BACKBUFFER aspect matrix. */
+    mkview::Rect hdWide=mkview::output(true,true);
+    mkview::Rect hd43=mkview::output(false,true);
+    mkview::Rect crt43=mkview::output(false,false);
+    mkview::Rect crtWide=mkview::output(true,false);
+    CHECK(hdWide.x==0&&hdWide.y==0&&hdWide.w==1280&&hdWide.h==720);
+    CHECK(hd43.x==160&&hd43.y==0&&hd43.w==960&&hd43.h==720);
+    CHECK(crt43.x==0&&crt43.y==0&&crt43.w==1280&&crt43.h==720);
+    CHECK(crtWide.x==0&&crtWide.y==90&&crtWide.w==1280&&crtWide.h==540);
     mkview::Rect r;CHECK(!mkview::crop(3,3,3,r));CHECK(!mkview::crop(0,2,0,r));
 }
 

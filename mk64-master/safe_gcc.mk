@@ -170,12 +170,12 @@ SAFE_C_FILES :=    \
     build/us/src/os/math/llmuldiv.o    \
     build/us/src/os/math/sinf.o    \
 
-#    build/us/src/save.o    
-#    build/us/src/crash_screen.o    
-#    build/us/src/code_8006E9C0.o    
-#    build/us/src/audio/synthesis.o    
-#    build/us/src/code_80057C60.o    
-#    build/us/src/menus.o    
-#    build/us/src/render_objects.o    
-#    build/us/src/code_800AF9B0.o    
-#    build/us/src/update_objects.o    
+#    build/us/src/save.o
+#    build/us/src/crash_screen.o
+#    build/us/src/code_8006E9C0.o
+#    build/us/src/audio/synthesis.o
+#    build/us/src/code_80057C60.o
+#    build/us/src/menus.o
+#    build/us/src/render_objects.o
+#    build/us/src/code_800AF9B0.o
+#    build/us/src/update_objects.o

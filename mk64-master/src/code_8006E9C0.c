@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #ifdef XBOX360_PORT
 #include "xbox360/assets.h"
 #define X360_REMAINING_BANK_ADDRESS(address) ((u8*)x360_asset_dma_address((uintptr_t)(x360_rom+0x641F70),(uintptr_t)(address)))
@@ -50,6 +51,19 @@ void init_hud(void) {
         case SCREEN_MODE_3P_4P_SPLITSCREEN:
             init_hud_three_four_player();
             break;
+    }
+    if(x360_net8_active()) {
+        int i;
+        for(i=1;i<x360_net_player_count();++i) {
+            if(i>=2) {
+                find_unused_obj_index(&gIndexLakituList[i]);
+                find_unused_obj_index(&gItemWindowObjectByPlayerId[i]);
+            }
+            playerHUD[i]=playerHUD[0];
+            playerHUD[i].stagingPosition=gGPCurrentRaceRankByPlayerId[i];
+            init_item_window(gItemWindowObjectByPlayerId[i]);
+        }
+        D_8018D158=x360_net_player_count();
     }
     func_80070148();
 }

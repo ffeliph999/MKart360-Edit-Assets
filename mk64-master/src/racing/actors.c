@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <PR/os.h>
@@ -570,7 +571,7 @@ void evaluate_collision_player_palm_trees(Player* player) {
 void evaluate_collision_players_palm_trees(void) {
     s32 index;
 
-    for (index = 0; index < 4; index++) {
+    for (index = 0; index < (x360_net8_active()?x360_net_player_count():4); index++) {
         if (((gPlayers[index].type & 0xC000) != 0) &&
             ((s8) (u8) get_surface_type(gPlayers[index].collision.meshIndexZX) == GRASS)) {
             evaluate_collision_player_palm_trees(&gPlayers[index]);
@@ -1009,7 +1010,7 @@ void init_kiwano_fruit(void) {
     s32 i;
 
     // phi_s0 = 0;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < (x360_net8_active()?x360_net_player_count():4); i++) {
         phi_s1 = &gPlayers[i];
         // temp_v0 = *phi_s1;
         if ((phi_s1->type & PLAYER_HUMAN) == 0) {

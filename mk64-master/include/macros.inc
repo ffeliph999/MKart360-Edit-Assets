@@ -377,7 +377,7 @@
 .set OS_MIN_STACKSIZE,	72
 
 /*
- * Values for osTvType 
+ * Values for osTvType
  */
 .set OS_TV_PAL,		0
 .set OS_TV_NTSC,		1
@@ -475,7 +475,7 @@
 
 /* SP memory address (R/W): [11:0] DMEM/IMEM address; [12] 0=DMEM,1=IMEM */
 .set SP_MEM_ADDR_REG,		(SP_BASE_REG+0x00)	/* Master */
-						
+
 /* SP DRAM DMA address (R/W): [23:0] RDRAM address */
 .set SP_DRAM_ADDR_REG,	(SP_BASE_REG+0x04)	/* Slave */
 
@@ -555,7 +555,7 @@
 .set SP_STATUS_SIG6,	       0x2000		/* Bit 13: signal 6 set */
 .set SP_STATUS_SIG7,	       0x4000		/* Bit 14: signal 7 set */
 
-/* 
+/*
  * Use of SIG bits
  */
 .set SP_CLR_YIELD,		SP_CLR_SIG0
@@ -587,15 +587,15 @@
 /*
  * Patterns to interpret status reg (SP_BIST_REG - read)
  */
-/* First 2 bits are same as in write mode:  
- * Bit 0: BIST check; Bit 1: BIST go 
+/* First 2 bits are same as in write mode:
+ * Bit 0: BIST check; Bit 1: BIST go
  */
 .set SP_IBIST_DONE,		0x04		/* Bit 2: BIST done */
 .set SP_IBIST_FAILED,		0x78		/* Bit [6:3]: BIST fail */
 
 
 /*************************************************************************
- * DP Command Registers 
+ * DP Command Registers
  */
 .set DPC_BASE_REG,		0x04100000
 
@@ -606,13 +606,13 @@
 .set DPC_END_REG,		(DPC_BASE_REG+0x04)
 
 /* DP CMD DMA end (R): [23:0] DMEM/RDRAM current address */
-.set DPC_CURRENT_REG,		(DPC_BASE_REG+0x08)	
+.set DPC_CURRENT_REG,		(DPC_BASE_REG+0x08)
 
 /* DP CMD status (R/W): [9:0] valid bits - see below for definitions */
 .set DPC_STATUS_REG,		(DPC_BASE_REG+0x0C)
 
 /* DP clock counter (R): [23:0] clock counter */
-.set DPC_CLOCK_REG,		(DPC_BASE_REG+0x10)	
+.set DPC_CLOCK_REG,		(DPC_BASE_REG+0x10)
 
 /* DP buffer busy counter (R): [23:0] clock counter */
 .set DPC_BUFBUSY_REG,		(DPC_BASE_REG+0x14)
@@ -655,7 +655,7 @@
 
 
 /*************************************************************************
- * DP Span Registers 
+ * DP Span Registers
  */
 .set DPS_BASE_REG,		0x04200000
 
@@ -681,19 +681,19 @@
 /*
  * Patterns to interpret status reg (DPS_TMEM_BIST_REG - read)
  */
-/* First 2 bits are same as in write mode:  
- * Bit 0: BIST check; Bit 1: BIST go 
+/* First 2 bits are same as in write mode:
+ * Bit 0: BIST check; Bit 1: BIST go
  */
 .set DPS_TBIST_DONE,		0x004		/* Bit 2: BIST done */
 .set DPS_TBIST_FAILED,	0x7F8		/* Bit [10:3]: BIST fail */
 
 
 /*************************************************************************
- * MIPS Interface (MI) Registers 
+ * MIPS Interface (MI) Registers
  */
 .set MI_BASE_REG,		0x04300000
 
-/* 
+/*
  * MI init mode (W): [6:0] init length, [7] clear init mode, [8] set init mode
  *                   [9/10] clear/set ebus test mode, [11] clear DP interrupt
  *              (R): [6:0] init length, [7] init mode, [8] ebus test mode
@@ -726,9 +726,9 @@
 /* MI interrupt (R): [5:0] valid bits - see below for bit patterns */
 .set MI_INTR_REG,		(MI_BASE_REG+0x08)
 
-/* 
- * MI interrupt mask (W): [11:0] valid bits - see below for bit patterns 
- *                   (R): [5:0] valid bits - see below for bit patterns 
+/*
+ * MI interrupt mask (W): [11:0] valid bits - see below for bit patterns
+ *                   (R): [5:0] valid bits - see below for bit patterns
  */
 .set MI_INTR_MASK_REG,	(MI_BASE_REG+0x0C)
 
@@ -744,7 +744,7 @@
 
 /*
  * The following are values to clear/set various interrupt bit mask
- * They can be ORed together to manipulate multiple bits 
+ * They can be ORed together to manipulate multiple bits
  * (MI_INTR_MASK_REG - write)
  */
 .set MI_INTR_MASK_CLR_SP,	0x0001		/* Bit  0: clear SP mask */
@@ -761,7 +761,7 @@
 .set MI_INTR_MASK_SET_DP,	0x0800		/* Bit 11: set DP mask */
 
 /*
- * The following are values to check for interrupt mask setting 
+ * The following are values to check for interrupt mask setting
  * (MI_INTR_MASK_REG - read)
  */
 .set MI_INTR_MASK_SP,		0x01		/* Bit 0: SP intr mask */
@@ -773,12 +773,12 @@
 
 
 /*************************************************************************
- * Video Interface (VI) Registers 
+ * Video Interface (VI) Registers
  */
 .set VI_BASE_REG,		0x04400000
 
-/* VI status/control (R/W): [15-0] valid bits: 
- *	[1:0]   = type[1:0] (pixel size) 
+/* VI status/control (R/W): [15-0] valid bits:
+ *	[1:0]   = type[1:0] (pixel size)
  *			0: blank (no data, no sync)
  *                      1: reserved
  *                      2: 5/5/5/3 ("16" bit)
@@ -789,7 +789,7 @@
  *	[5]     = reserved - always off
  *	[6]     = serrate (always on if interlaced, off if not)
  *	[7]     = reserved - diagnostics only
- *	[9:8]   = anti-alias (aa) mode[1:0] 
+ *	[9:8]   = anti-alias (aa) mode[1:0]
  *			0: aa & resamp (always fetch extra lines)
  *                      1: aa & resamp (fetch extra lines if needed)
  *                      2: resamp only (treat as all fully covered)
@@ -806,77 +806,77 @@
 .set VI_DRAM_ADDR_REG,	VI_ORIGIN_REG
 
 /* VI width (R/W): [11:0] frame buffer line width in pixels */
-.set VI_WIDTH_REG,		(VI_BASE_REG+0x08)	
+.set VI_WIDTH_REG,		(VI_BASE_REG+0x08)
 .set VI_H_WIDTH_REG,		VI_WIDTH_REG
 
 /* VI vertical intr (R/W): [9:0] interrupt when current half-line = V_INTR */
-.set VI_INTR_REG,		(VI_BASE_REG+0x0C)	
+.set VI_INTR_REG,		(VI_BASE_REG+0x0C)
 .set VI_V_INTR_REG,		VI_INTR_REG
 
-/* 
+/*
  * VI current vertical line (R/W): [9:0] current half line, sampled once per
  *	line (the lsb of V_CURRENT is constant within a field, and in
  *	interlaced modes gives the field number - which is constant for non-
  *	interlaced modes)
  * 	- Any write to this register will clear interrupt line
  */
-.set VI_CURRENT_REG,		(VI_BASE_REG+0x10)	
+.set VI_CURRENT_REG,		(VI_BASE_REG+0x10)
 .set VI_V_CURRENT_LINE_REG,	VI_CURRENT_REG
 
-/* 
- * VI video timing (R/W): [ 7: 0] horizontal sync width in pixels, 
+/*
+ * VI video timing (R/W): [ 7: 0] horizontal sync width in pixels,
  *			  [15: 8] color burst width in pixels,
- *                        [19:16] vertical sync width in half lines,   
+ *                        [19:16] vertical sync width in half lines,
  *			  [29:20] start of color burst in pixels from h-sync
  */
-.set VI_BURST_REG,		(VI_BASE_REG+0x14)	
+.set VI_BURST_REG,		(VI_BASE_REG+0x14)
 .set VI_TIMING_REG,		VI_BURST_REG
 
 /* VI vertical sync (R/W): [9:0] number of half-lines per field */
-.set VI_V_SYNC_REG,		(VI_BASE_REG+0x18)	
+.set VI_V_SYNC_REG,		(VI_BASE_REG+0x18)
 
-/* VI horizontal sync (R/W): [11: 0] total duration of a line in 1/4 pixel 
- *			     [20:16] a 5-bit leap pattern used for PAL only 
+/* VI horizontal sync (R/W): [11: 0] total duration of a line in 1/4 pixel
+ *			     [20:16] a 5-bit leap pattern used for PAL only
  *				     (h_sync_period)
  */
-.set VI_H_SYNC_REG,		(VI_BASE_REG+0x1C)	
+.set VI_H_SYNC_REG,		(VI_BASE_REG+0x1C)
 
-/* 
+/*
  * VI horizontal sync leap (R/W): [11: 0] identical to h_sync_period
  *                                [27:16] identical to h_sync_period
  */
-.set VI_LEAP_REG,		(VI_BASE_REG+0x20)	
+.set VI_LEAP_REG,		(VI_BASE_REG+0x20)
 .set VI_H_SYNC_LEAP_REG,	VI_LEAP_REG
 
-/* 
+/*
  * VI horizontal video (R/W): [ 9: 0] end of active video in screen pixels
  *                          : [25:16] start of active video in screen pixels
  */
 .set VI_H_START_REG,		(VI_BASE_REG+0x24)
 .set VI_H_VIDEO_REG,		VI_H_START_REG
 
-/* 
+/*
  * VI vertical video (R/W): [ 9: 0] end of active video in screen half-lines
  *                        : [25:16] start of active video in screen half-lines
  */
 .set VI_V_START_REG,		(VI_BASE_REG+0x28)
 .set VI_V_VIDEO_REG,		VI_V_START_REG
 
-/* 
+/*
  * VI vertical burst (R/W): [ 9: 0] end of color burst enable in half-lines
  *                        : [25:16] start of color burst enable in half-lines
  */
-.set VI_V_BURST_REG,		(VI_BASE_REG+0x2C)	
+.set VI_V_BURST_REG,		(VI_BASE_REG+0x2C)
 
 /* VI x-scale (R/W): [11: 0] 1/horizontal scale up factor (2.10 format)
  *		     [27:16] horizontal subpixel offset (2.10 format)
  */
-.set VI_X_SCALE_REG,		(VI_BASE_REG+0x30)	
+.set VI_X_SCALE_REG,		(VI_BASE_REG+0x30)
 
 /* VI y-scale (R/W): [11: 0] 1/vertical scale up factor (2.10 format)
  *		     [27:16] vertical subpixel offset (2.10 format)
  */
-.set VI_Y_SCALE_REG,		(VI_BASE_REG+0x34)	
+.set VI_Y_SCALE_REG,		(VI_BASE_REG+0x34)
 
 /*
  * Patterns to interpret VI_CONTROL_REG
@@ -899,7 +899,7 @@
 
 
 /*************************************************************************
- * Audio Interface (AI) Registers 
+ * Audio Interface (AI) Registers
  *
  * The address and length registers are double buffered; that is, they
  * can be written twice before becoming full.
@@ -917,21 +917,21 @@
 /* AI control (W): [0] DMA enable - if LSB == 1, DMA is enabled */
 .set AI_CONTROL_REG,		(AI_BASE_REG+0x08)	/* R2: DMA Control */
 
-/* 
- * AI status (R): [31]/[0] ai_full (addr & len buffer full), [30] ai_busy 
+/*
+ * AI status (R): [31]/[0] ai_full (addr & len buffer full), [30] ai_busy
  *		  Note that a 1->0 transition in ai_full will set interrupt
- *           (W): clear audio interrupt 
+ *           (W): clear audio interrupt
  */
 .set AI_STATUS_REG,		(AI_BASE_REG+0x0C)	/* R3: Status */
 
-/* 
- * AI DAC sample period register (W): [13:0] dac rate 
+/*
+ * AI DAC sample period register (W): [13:0] dac rate
  *   - vid_clock/(dperiod + 1) is the DAC sample rate
  *   - (dperiod + 1) >= 66 * (aclockhp + 1) must be true
  */
 .set AI_DACRATE_REG,		(AI_BASE_REG+0x10)	/* R4: DAC rate 14-lsb*/
 
-/* 
+/*
  * AI bit rate (W): [3:0] bit rate (abus clock half period register - aclockhp)
  *   - vid_clock/(2 * (aclockhp + 1)) is the DAC clock rate
  *   - The abus clock stops if aclockhp is zero
@@ -972,7 +972,7 @@
 
 
 /*************************************************************************
- * Peripheral Interface (PI) Registers 
+ * Peripheral Interface (PI) Registers
  */
 .set PI_BASE_REG,		0x04600000
 
@@ -988,7 +988,7 @@
 /* PI write length (R/W): [23:0] write data length */
 .set PI_WR_LEN_REG,		(PI_BASE_REG+0x0C)
 
-/* 
+/*
  * PI status (R): [0] DMA busy, [1] IO busy, [2], error
  *           (W): [0] reset controller (and abort current op), [1] clear intr
  */
@@ -1039,12 +1039,12 @@
 /* PI status register has 2 bits active when written to:
  *	Bit 0: When set, reset PIC
  *	Bit 1: When set, clear interrupt flag
- * The values of the two bits can be ORed together to both reset PIC and 
+ * The values of the two bits can be ORed together to both reset PIC and
  * clear interrupt at the same time.
  *
- * Note: 
- *	- The PIC does generate an interrupt at the end of each DMA. CPU 
- *	needs to clear the interrupt flag explicitly (from an interrupt 
+ * Note:
+ *	- The PIC does generate an interrupt at the end of each DMA. CPU
+ *	needs to clear the interrupt flag explicitly (from an interrupt
  *	handler) by writing into the STATUS register with bit 1 set.
  *
  *	- When a DMA completes, the interrupt flag is set.  CPU can issue
@@ -1076,12 +1076,12 @@
 
 
 /*************************************************************************
- * RDRAM Interface (RI) Registers 
+ * RDRAM Interface (RI) Registers
  */
 .set RI_BASE_REG,		0x04700000
 
 /* RI mode (R/W): [1:0] operating mode, [2] stop T active, [3] stop R active */
-.set RI_MODE_REG,		(RI_BASE_REG+0x00)	
+.set RI_MODE_REG,		(RI_BASE_REG+0x00)
 
 /* RI config (R/W): [5:0] current control input, [6] current control enable */
 .set RI_CONFIG_REG,		(RI_BASE_REG+0x04)
@@ -1093,8 +1093,8 @@
 .set RI_SELECT_REG,		(RI_BASE_REG+0x0C)
 
 /* RI refresh (R/W): [7:0] clean refresh delay, [15:8] dirty refresh delay,
- *		     [16] refresh bank, [17] refresh enable 
- *		     [18] refresh optimize 
+ *		     [16] refresh bank, [17] refresh enable
+ *		     [18] refresh optimize
  */
 .set RI_REFRESH_REG,		(RI_BASE_REG+0x10)
 .set RI_COUNT_REG,		RI_REFRESH_REG
@@ -1110,7 +1110,7 @@
 
 
 /*************************************************************************
- * Serial Interface (SI) Registers 
+ * Serial Interface (SI) Registers
  */
 .set SI_BASE_REG,		0x04800000
 
@@ -1125,7 +1125,7 @@
 /* SI address write 64B (W): [] any write causes a 64B DMA read */
 .set SI_PIF_ADDR_WR64B_REG,	(SI_BASE_REG+0x10)	/* R4: 64B DRAM->PIF */
 
-/* 
+/*
  * SI status (W): [] any write clears interrupt
  *           (R): [0] DMA busy, [1] IO read busy, [2] reserved
  *                [3] DMA error, [12] interrupt

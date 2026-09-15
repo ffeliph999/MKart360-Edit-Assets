@@ -11,4 +11,3 @@ glabel __osSetSR
     nop
     jr    $ra
      nop
-

@@ -2,7 +2,7 @@
   segments:
     - [0x02, 0x12AAE0]
     - [0x0D, 0x132B50]
-  header: 
+  header:
     code:
       - '#include <macros.h>'
       - '#include <ultra64.h>'

@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <common_structs.h>
@@ -24,7 +25,7 @@
 
 f32 D_800DDB30[] = { 0.4f, 0.6f, 0.275f, 0.3f };
 
-Camera cameras[4];
+Camera cameras[8];
 Camera* camera1 = &cameras[0];
 Camera* camera2 = &cameras[1];
 Camera* camera3 = &cameras[2];
@@ -32,24 +33,24 @@ Camera* camera4 = &cameras[3];
 
 UNUSED s32 D_801649D0[2];
 
-f32 D_801649D8[4];
-f32 D_801649E8[4];
-f32 D_801649F8[4];
-s32 D_80164A08[4];
-s32 D_80164A18[4];
+f32 D_801649D8[8];
+f32 D_801649E8[8];
+f32 D_801649F8[8];
+s32 D_80164A08[8];
+s32 D_80164A18[8];
 s32 D_80164A28;
 s32 D_80164A2C;
 f32 D_80164A30;
 UNUSED f32 D_80164A34;
-f32 D_80164A38[4];
-f32 D_80164A48[4];
+f32 D_80164A38[8];
+f32 D_80164A48[8];
 UNUSED s32 D_80164A58[8];
-f32 D_80164A78[4];
+f32 D_80164A78[8];
 s8 D_80164A88;
 s8 D_80164A89;
 // UNUSED s8 D_80164A8C[3];
-f32 D_80164A90[4];
-f32 D_80164AA0[4];
+f32 D_80164A90[8];
+f32 D_80164AA0[8];
 
 extern f32 D_80164498[];
 extern s16 D_80164678[];
@@ -219,6 +220,8 @@ void func_8001CA24(Player* player, f32 arg1) {
         camera += 3;
     }
     camera->unk_94.unk_8 = 0;
+    if(x360_net8_active()) camera=&cameras[player-gPlayers];
+    camera->unk_94.unk_8=0;
     camera->unk_94.unk_0 = arg1;
 }
 
@@ -921,6 +924,14 @@ void func_8001EA0C(Camera* camera, Player* player, s8 arg2) {
 
 void func_8001EE98(Player* player, Camera* camera, s8 index) {
     s32 cameraIndex;
+    if (x360_net8_active()) {
+        if (gIsGamePaused == 0) {
+            if (player->lakituProps & (LAKITU_RETRIEVAL | HELD_BY_LAKITU)) func_8001E8E8(camera, player, index);
+            else if (gModeSelection == BATTLE) func_8001EA0C(camera, player, index);
+            else func_8001E45C(camera, player, index);
+        }
+        return;
+    }
 
     if (camera == camera1) {
         cameraIndex = 0;
@@ -934,6 +945,7 @@ void func_8001EE98(Player* player, Camera* camera, s8 index) {
     if (camera == camera4) {
         cameraIndex = 3;
     }
+    if (x360_net8_active()) cameraIndex = index;
     switch (gModeSelection) {
         case GRAND_PRIX:
             // clang-format off
@@ -1044,6 +1056,7 @@ void func_8001F394(Player* player, f32* arg1) {
         playerIndex = 3;
     }
 
+    if(x360_net8_active()) playerIndex=(s32)(player-gPlayers);
     if (D_80164A08[playerIndex] == 0) {
         if (player->triggers & DRAG_ITEM_EFFECT) {
             D_80164A08[playerIndex] = 1;

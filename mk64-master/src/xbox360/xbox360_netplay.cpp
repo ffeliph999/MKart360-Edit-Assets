@@ -5,7 +5,11 @@
 #include <stdarg.h>
 #include <string.h>
 #include "xbox360/netplay.h"
+#include "xbox360/race8.h"
+#include "xbox360/race8_state.h"
 #include "xbox360/netplay_protocol.h"
+#include "xbox360/netplay_diagnostic.h"
+#include "xbox360/platform.h" /* X360_CRT_480I_NATIVE_BACKBUFFER */
 extern "C" IDirect3DDevice9 *x360_d3d_device(void);
 extern "C" void x360_log(const char *);
 extern "C" HRESULT x360_party_publish_host(unsigned int publicIp,unsigned short port,unsigned int token);
@@ -17,19 +21,24 @@ extern "C" int x360_party_logging_enabled(void);
 extern "C" void x360_party_set_logging(int enabled);
 /* UI uses target clears, so it needs no external font file or shader state. */
 #include "xbox360_netfont.h"
+/* Set to 1 later to restore GAME / NETPLAY / PARTY logger controls.
+ * At 0 the menu is hidden and all three loggers are forced OFF at boot. */
+#define MK64_ENABLE_LOGGER_OPTIONS 0
+
 static bool display_wide=true;
 extern "C" int x360_display_widescreen(void){return display_wide?1:0;}
 extern "C" float x360_display_aspect(void){return display_wide?16.0f/9.0f:4.0f/3.0f;}
-static void screen(const char *title,const char *a,const char *b,const char *c,const char *d,const char *footer="B BACK    LOGGING IN OPTIONS",const char *detail=0) {
+static void screen(const char *title,const char *a,const char *b,const char *c,const char *d,const char *footer="B BACK",const char *detail=0) {
     IDirect3DDevice9 *dev=x360_d3d_device();if(!dev)return;
-    D3DVIEWPORT9 full={0,0,1280,720,0,1};dev->SetViewport(&full);
-    RECT all={0,0,1280,720};dev->SetScissorRect(&all);
+    const DWORD sw=(DWORD)x360_video_width(),sh=(DWORD)x360_video_height();
+    D3DVIEWPORT9 full={0,0,sw,sh,0,1};dev->SetViewport(&full);
+    RECT all={0,0,(LONG)sw,(LONG)sh};dev->SetScissorRect(&all);
     dev->Clear(0,0,D3DCLEAR_TARGET,0xFF102030,1,0);
     net_text(dev,72,64,title,5,0xFFFFD050);net_text(dev,72,170,a,3,0xFFFFFFFF);
     net_text(dev,72,240,b,3,0xFFFFFFFF);net_text(dev,72,330,c,3,0xFF90D0FF);
     net_text(dev,72,410,d,3,0xFF90D0FF);
     net_text(dev,72,580,footer,3,0xFFAAAAAA);
-    net_text(dev,72,630,detail?detail:"LOGGING CONTROLS: OPTIONS",3,0xFFAAAAAA);
+    net_text(dev,72,630,detail?detail:"",3,0xFFAAAAAA);
     dev->Present(0,0,0,0);
 }
 static WORD prev_buttons;
@@ -600,7 +609,7 @@ static void public_ip(){
     }
     DWORD begin=GetTickCount();
     while(dns->iStatus==WSAEINPROGRESS&&GetTickCount()-begin<4000){
-        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
+        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYER GAME":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
         if(pressed()&XINPUT_GAMEPAD_B)break;
         Sleep(10);
     }
@@ -641,7 +650,7 @@ static void public_ip(){
             net_log("MK64NET4: STUN public endpoint=%s\n",public_address);
             return;
         }
-        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
+        screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYER GAME":"HOST 2-4 PLAYER GAME","FINDING INTERNET ADDRESS",local_address,"","");
         if(pressed()&XINPUT_GAMEPAD_B)break;
         Sleep(10);
     }
@@ -818,7 +827,7 @@ static bool host_ip_editor(sockaddr_in &out){
     char digits[16]="000.000.000.000";int cursor=0;
     while(true){
         char marker[80];memset(marker,' ',strlen(digits));marker[strlen(digits)]=0;marker[cursor]='^';
-        screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYERS ONLINE":"JOIN 2-4 PLAYER GAME",digits,marker,"WAIT HERE - ACCEPT HOST PARTY INVITE IN GUIDE","AUTO-CONNECTS AFTER PARTY JOIN - A MANUAL IP");WORD p=pressed();
+        screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYER GAME":"JOIN 2-4 PLAYER GAME",digits,marker,"WAIT HERE - ACCEPT HOST PARTY INVITE IN GUIDE","AUTO-CONNECTS AFTER PARTY JOIN - A MANUAL IP");WORD p=pressed();
 
         /*
          * V11: The joining player may stay on this screen while accepting the
@@ -874,7 +883,7 @@ static bool lobby(bool host){
     strcpy(local_address,"LOCAL ADDRESS UNAVAILABLE");XNADDR addr;memset(&addr,0,sizeof(addr));XNetGetTitleXnAddr(&addr);if(addr.ina.s_addr)address_text(local_address,ntohl(addr.ina.s_addr),6464);
 
     if(host){
-        strcpy(public_address,"DISCOVERING PUBLIC ADDRESS");public_ip();screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME",public_address,local_address,"SETTING UP UDP 6464 AUTOMATICALLY","");
+        strcpy(public_address,"DISCOVERING PUBLIC ADDRESS");public_ip();screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYER GAME":"HOST 2-4 PLAYER GAME",public_address,local_address,"SETTING UP UDP 6464 AUTOMATICALLY","");
         bool mapped=map_router(public_address);net_log("MK64NET4: host ready public=%s upnp=%s\n",public_address,mapped?"OK":"NO");
         uint32_t partyIp=0;uint16_t partyPort=0;
         if(mknet::parse_endpoint(public_address,partyIp,partyPort)){
@@ -939,13 +948,13 @@ static bool lobby(bool host){
                 const char *friendLine=partyReady
                     ?"FRIEND: JOIN PARTY, RUN MK360, CHOOSE JOIN, PRESS X"
                     :"AFTER STARTING PARTY: RETURN HERE AND PRESS X AGAIN";
-                screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYERS ONLINE":"HOST 2-4 PLAYER GAME",public_address,status,partyLine,friendLine);
+                screen(mknet::lobby_capacity()==8?"HOST 4-8 PLAYER GAME":"HOST 2-4 PLAYER GAME",public_address,status,partyLine,friendLine);
             }
             if(start_sent){for(int i=0;i<n;++i)if(now-peers[i].last_received>30000){net_log("MK64NET4: P%u start timeout\n",peers[i].slot+1);failed=true;}}
         }else{
             char status[80],diag[80];if(host_session_known)_snprintf(status,sizeof(status)-1,"ASSIGNED P%u - WAITING FOR HOST",assigned_slot+1);else _snprintf(status,sizeof(status)-1,"CONNECTING TO HOST");status[sizeof(status)-1]=0;
             _snprintf(diag,sizeof(diag)-1,"RX=%u V=%u OFFER=%u TX=%u F=%u",net_rx_total,net_rx_valid,net_rx_offer,net_tx_punch,net_tx_punch_fail);diag[sizeof(diag)-1]=0;
-            screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYERS ONLINE":"JOIN 2-4 PLAYER GAME",status,local_address,diag,"ALL GUESTS ENTER SAME HOST IP");
+            screen(mknet::lobby_capacity()==8?"JOIN 4-8 PLAYER GAME":"JOIN 2-4 PLAYER GAME",status,local_address,diag,"ALL GUESTS ENTER SAME HOST IP");
             if(now-last_received>30000){net_log("MK64NET4: join timeout after 30s\n");failed=true;}
         }
         Sleep(10);
@@ -1043,41 +1052,67 @@ static void logging_menu(){
 
 static void options_menu(){
     int row=0;bool save_failed=false;prev_buttons=0;
+#if MK64_ENABLE_LOGGER_OPTIONS
+    const int row_count=4;
+#else
+    const int row_count=3;
+#endif
     for(;;){
-        char aspect[64],controls[80],logging[80],music[80];
+        char aspect[64],controls[80],third[80],fourth[80];
         _snprintf(aspect,sizeof(aspect)-1,"%c ASPECT: %s",row==0?'>':' ',display_wide?"16:9":"4:3");aspect[sizeof(aspect)-1]=0;
         _snprintf(controls,sizeof(controls)-1,"%c CONTROLLER REBINDING",row==1?'>':' ');controls[sizeof(controls)-1]=0;
-        _snprintf(logging,sizeof(logging)-1,"%c LOGGING SETTINGS",row==2?'>':' ');logging[sizeof(logging)-1]=0;
-        _snprintf(music,sizeof(music)-1,"%c IN-GAME MUSIC: %s",row==3?'>':' ',x360_music_enabled()?"ON":"OFF");music[sizeof(music)-1]=0;
-        screen("OPTIONS",aspect,controls,logging,music,"A SELECT    LEFT/RIGHT CHANGE    B BACK",
+#if MK64_ENABLE_LOGGER_OPTIONS
+        _snprintf(third,sizeof(third)-1,"%c LOGGING SETTINGS",row==2?'>':' ');third[sizeof(third)-1]=0;
+        _snprintf(fourth,sizeof(fourth)-1,"%c IN-GAME MUSIC: %s",row==3?'>':' ',x360_music_enabled()?"ON":"OFF");fourth[sizeof(fourth)-1]=0;
+#else
+        _snprintf(third,sizeof(third)-1,"%c IN-GAME MUSIC: %s",row==2?'>':' ',x360_music_enabled()?"ON":"OFF");third[sizeof(third)-1]=0;
+        fourth[0]=0;
+#endif
+        screen("OPTIONS",aspect,controls,third,fourth,"A SELECT    LEFT/RIGHT CHANGE    B BACK",
             save_failed?"MUSIC CHANGED; COULD NOT SAVE TO DISK":"DPAD LEFT/RIGHT ALSO STEERS IN GAME");
         WORD p=pressed(false);
         if(p&XINPUT_GAMEPAD_B){prev_buttons=0;return;}
-        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+3)%4;
-        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%4;
+        if(p&XINPUT_GAMEPAD_DPAD_UP)row=(row+row_count-1)%row_count;
+        if(p&XINPUT_GAMEPAD_DPAD_DOWN)row=(row+1)%row_count;
         if(row==0&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))display_wide=!display_wide;
         if(row==1&&(p&XINPUT_GAMEPAD_A)){controls_menu();prev_buttons=0;}
+#if MK64_ENABLE_LOGGER_OPTIONS
         if(row==2&&(p&XINPUT_GAMEPAD_A)){logging_menu();prev_buttons=0;}
         if(row==3&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))save_failed=!x360_music_set_enabled(!x360_music_enabled());
+#else
+        if(row==2&&(p&(XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT)))save_failed=!x360_music_set_enabled(!x360_music_enabled());
+#endif
         Sleep(16);
     }
 }
 
+static bool input_test_active=false;
+static uint32_t input_test_hash=2166136261U;
+static Race8Lobby raceLobby;
+
 extern "C" int x360_net_boot_menu(void){
+#if !MK64_ENABLE_LOGGER_OPTIONS
+    /* Release/default behavior: all logger code remains compiled, but none of
+     * the three file loggers can be left enabled from the UI. */
+    x360_set_logging(0);
+    net_set_logging(false);
+    x360_party_set_logging(0);
+#endif
     x360_controls_load();
     int selection=0;
     for(;;){
         IDirect3DDevice9 *dev=x360_d3d_device();
         if(dev){
-            D3DVIEWPORT9 full={0,0,1280,720,0,1};dev->SetViewport(&full);
-            RECT all={0,0,1280,720};dev->SetScissorRect(&all);
+            const DWORD sw=(DWORD)x360_video_width(),sh=(DWORD)x360_video_height();
+            D3DVIEWPORT9 full={0,0,sw,sh,0,1};dev->SetViewport(&full);
+            RECT all={0,0,(LONG)sw,(LONG)sh};dev->SetScissorRect(&all);
             dev->Clear(0,0,D3DCLEAR_TARGET,0xFF102030,1,0);
             net_text(dev,72,54,"MARIO KART 64 - ONLINE",5,0xFFFFD050);
             const char *labels[]={"OFFLINE","HOST 2-4 PLAYER GAME","JOIN 2-4 PLAYER GAME",
-                "HOST 4-8 PLAYERS ONLINE","JOIN 4-8 PLAYERS ONLINE","OPTIONS / CONTROLS / LOGGING"};
+                "HOST 4-8 PLAYER GAME","JOIN 4-8 PLAYER GAME","OPTIONS / CONTROLS"};
             for(int row=0;row<6;++row){char line[96];_snprintf(line,sizeof(line),"%c %s",row==selection?'>':' ',labels[row]);net_text(dev,72,170+row*60,line,3,row==selection?0xFFFFD050:0xFFFFFFFF);}
             net_text(dev,72,600,"A SELECT    UP/DOWN CHOOSE",3,0xFFAAAAAA);
-            net_text(dev,72,646,"4-8 PLAYER MODE: EXPERIMENTAL RACING / BATTLE",3,0xFFAAAAAA);
+            net_text(dev,72,646,"4-8 PLAYER VS RACING AND BATTLE - BUILD B3000914",3,0xFFAAAAAA);
             dev->Present(0,0,0,0);
         }
         WORD p=pressed();if(p&XINPUT_GAMEPAD_DPAD_DOWN)selection=(selection+1)%6;if(p&XINPUT_GAMEPAD_DPAD_UP)selection=(selection+5)%6;
@@ -1086,7 +1121,10 @@ extern "C" int x360_net_boot_menu(void){
             if(selection==0){close_network();return 0;}
             if(selection==5){options_menu();continue;}
             mknet::lobby_capacity()=(selection==3||selection==4)?8:4;
-            if(lobby(selection==1||selection==3))return 1;
+            if(lobby(selection==1||selection==3)){
+                if(mknet::lobby_capacity()==8){race8_lobby_init(&raceLobby,(int)player_count);x360_net8_configure();}
+                return 1;
+            }
             while(true){screen("CONNECTION NOT ESTABLISHED","NO GAME WAS STARTED","ALL GUESTS USE THE SAME HOST IP","CHECK UDP 6464 / NETWORK SETTINGS","A RETURN TO MENU");if(pressed()&XINPUT_GAMEPAD_A)break;Sleep(16);}
         }
         Sleep(16);
@@ -1126,7 +1164,7 @@ extern "C" void x360_net_controllers(void *pads_,int count){
         if(!boot.complete)failed=true;
     }
     mknet::Pad input={pads[0].err_no?0:pads[0].button,pads[0].err_no?0:pads[0].stick_x,pads[0].err_no?0:pads[0].stick_y};
-    stream.sample_local(input,x360_net_state_hash());DWORD begin=GetTickCount(),sent=0;DWORD last_wait_screen=0;uint32_t sent_complete=0xFFFFFFFFU;mknet::Pad frame_pads[mknet::MAX_PLAYERS];
+    stream.sample_local(input,input_test_active?input_test_hash:x360_net_state_hash());DWORD begin=GetTickCount(),sent=0;DWORD last_wait_screen=0;uint32_t sent_complete=0xFFFFFFFFU;mknet::Pad frame_pads[mknet::MAX_PLAYERS];
     while(true){
         pump();DWORD now=GetTickCount();
         if(!sent||now-sent>=15||(hosting&&sent_complete!=stream.latest_complete)){
@@ -1167,4 +1205,63 @@ extern "C" void x360_net_controllers(void *pads_,int count){
     net_log("MK64NET4: session stop reason=%s frame=%u players=%u RX=%u REJ=%u TX=%u TF=%u\n",why,(unsigned)stream.frame,stopped_players,net_rx_input,net_rx_input_reject,net_tx_input,net_tx_input_fail);
     close_network();char stats[96];_snprintf(stats,sizeof(stats)-1,"%uP RX=%u REJ=%u TX=%u F=%u",stopped_players,net_rx_input,net_rx_input_reject,net_tx_input,net_tx_input_fail);stats[sizeof(stats)-1]=0;
     for(;;){screen(desync?"GAME STATE MISMATCH":"CONNECTION LOST","SESSION STOPPED TO PREVENT DIVERGENCE",why,stats,"B EXIT GAME");if(pressed()&XINPUT_GAMEPAD_B)XLaunchNewImage(0,0);Sleep(16);}
+}
+
+
+static const char *race8Names[]={"MARIO","LUIGI","YOSHI","TOAD","DK","WARIO","PEACH","BOWSER"};
+static const int race8Courses[]={8,9,6,11,10,5,1,0,14,12,7,2,18,4,3,13,15,16,17,19};
+static const char *race8CourseNames[]={"LUIGI RACEWAY","MOO MOO FARM","KOOPA TROOPA BEACH","KALAMARI DESERT",
+    "TOADS TURNPIKE","FRAPPE SNOWLAND","CHOCO MOUNTAIN","MARIO RACEWAY","WARIO STADIUM","SHERBET LAND",
+    "ROYAL RACEWAY","BOWSERS CASTLE","DK JUNGLE PARKWAY","YOSHI VALLEY","BANSHEE BOARDWALK","RAINBOW ROAD",
+    "BLOCK FORT","SKYSCRAPER","DOUBLE DECK","BIG DONUT"};
+extern "C" int x360_net8_character(int slot){return raceLobby.character[slot&7];}
+extern "C" int x360_net8_course(void){return race8Courses[raceLobby.course];}
+extern "C" int x360_net8_cc(void){return raceLobby.cc;}
+
+extern "C" void x360_net8_configure(void){
+    input_test_active=true;input_test_hash=2166136261U;
+    for(unsigned i=0;i<8;++i){raceLobby.ready[i]=0;raceLobby.previous[i]=0;}
+    for(;;){
+        NetPadCompat pads[8];unsigned short buttons[8];mknet::Pad normalized[8];
+        const DWORD begin=GetTickCount();
+        memset(pads,0,sizeof(pads));x360_read_controllers(pads,8);
+        for(unsigned i=0;i<player_count;++i){buttons[i]=pads[i].button;normalized[i].buttons=buttons[i];normalized[i].x=pads[i].stick_x;normalized[i].y=pads[i].stick_y;}
+        const int start=race8_lobby_step(&raceLobby,buttons);
+        input_test_hash=mknet::diagnostic_step(input_test_hash,normalized,player_count);
+        input_test_hash=(input_test_hash^raceLobby.course)*16777619U;
+        input_test_hash=(input_test_hash^raceLobby.cc)*16777619U;
+        for(unsigned i=0;i<player_count;++i){input_test_hash=(input_test_hash^raceLobby.character[i])*16777619U;input_test_hash=(input_test_hash^raceLobby.ready[i])*16777619U;}
+        if(start)break;
+        IDirect3DDevice9 *dev=x360_d3d_device();
+        if(dev){
+            const DWORD sw=(DWORD)x360_video_width(),sh=(DWORD)x360_video_height();
+            D3DVIEWPORT9 full={0,0,sw,sh,0,1};dev->SetViewport(&full);
+            RECT all={0,0,(LONG)sw,(LONG)sh};dev->SetScissorRect(&all);
+            dev->Clear(0,0,D3DCLEAR_TARGET,0xFF102030,1,0);
+            net_text(dev,60,36,"4-8 PLAYER ONLINE GAME",4,0xFFFFD050);
+            char line[120];_snprintf(line,sizeof(line),"%s - %s - %dCC",raceLobby.course<16?"VS":"BATTLE",race8CourseNames[raceLobby.course],50*(raceLobby.cc+1));
+            net_text(dev,60,100,line,2,0xFF90D0FF);
+            for(unsigned i=0;i<player_count;++i){
+                _snprintf(line,sizeof(line),"P%u %s  %-6s  %s",i+1,i==local_slot?"YOU   ":"REMOTE",race8Names[raceLobby.character[i]],raceLobby.ready[i]?"READY":"CHOOSING");
+                net_text(dev,60,158+i*45,line,3,i==local_slot?0xFFFFD050:0xFFFFFFFF);
+            }
+            net_text(dev,60,546,"D-PAD LEFT/RIGHT: CHARACTER   A: READY   B: UNREADY",2,0xFFCCCCCC);
+            net_text(dev,60,588,"HOST: UP/DOWN COURSE   R BUTTON: CC   START: RACE",2,0xFFCCCCCC);
+            net_text(dev,60,630,"CONTROLS FOLLOW YOUR SAVED N64 BUTTON MAPPINGS",2,0xFFCCCCCC);
+            dev->Present(0,0,0,0);
+        }
+        DWORD elapsed=GetTickCount()-begin;if(elapsed<33)Sleep(33-elapsed);
+    }
+    input_test_active=false;
+}
+
+extern "C" void x360_net8_draw_hud(void){
+    if(!x360_net8_active())return;
+    IDirect3DDevice9 *dev=x360_d3d_device();if(!dev)return;
+    D3DVIEWPORT9 full={0,0,(DWORD)x360_video_width(),(DWORD)x360_video_height(),0,1};dev->SetViewport(&full);
+    RECT all={0,0,(LONG)full.Width,(LONG)full.Height};dev->SetScissorRect(&all);
+    for(int row=0;row<11;++row){char line[128];if(x360_race8_hud_line(row,line,sizeof(line))){
+        int y=row<3?35+row*32:170+(row-3)*45;
+        net_text(dev,42,y,line,2,0xFF000000);net_text(dev,40,y-2,line,2,row==2?0xFFFFFF60:0xFFFFFFFF);
+    }}
 }

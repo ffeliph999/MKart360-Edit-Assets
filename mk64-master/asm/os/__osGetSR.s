@@ -12,4 +12,3 @@ glabel __osGetSR
      nop
 
     nop
-

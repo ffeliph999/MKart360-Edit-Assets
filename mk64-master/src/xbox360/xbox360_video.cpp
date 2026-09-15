@@ -6,16 +6,37 @@ static IDirect3D9 *g_d3d;
 static IDirect3DDevice9 *g_dev;
 static LONGLONG g_next_tick;
 static LARGE_INTEGER g_clock_frequency;
+/* X360_CRT_480I_NATIVE_BACKBUFFER */
+static unsigned g_video_width=1280;
+static unsigned g_video_height=720;
+static int g_video_widescreen=1;
 extern "C" int x360_video_is_black(void);
 
 extern "C" IDirect3DDevice9 *x360_d3d_device(void) { return g_dev; }
+extern "C" unsigned x360_video_width(void) { return g_video_width; }
+extern "C" unsigned x360_video_height(void) { return g_video_height; }
+extern "C" int x360_video_widescreen(void) { return g_video_widescreen; }
 
 extern "C" int x360_platform_init(void) {
     if (g_dev) return 1;
+    XVIDEO_MODE videoMode;
+    ZeroMemory(&videoMode, sizeof(videoMode));
+    XGetVideoMode(&videoMode);
+
+    /* Use the dashboard/output mode for SD (480i/480p), but preserve the
+     * port's known-good 1280x720 framebuffer for all higher resolutions. */
+    g_video_width =
+        (videoMode.dwDisplayWidth && videoMode.dwDisplayWidth < 1280)
+            ? (unsigned)videoMode.dwDisplayWidth : 1280U;
+    g_video_height =
+        (videoMode.dwDisplayHeight && videoMode.dwDisplayHeight < 720)
+            ? (unsigned)videoMode.dwDisplayHeight : 720U;
+    g_video_widescreen = videoMode.fIsWideScreen ? 1 : 0;
+
     D3DPRESENT_PARAMETERS pp;
     ZeroMemory(&pp, sizeof(pp));
-    pp.BackBufferWidth  = 1280;
-    pp.BackBufferHeight = 720;
+    pp.BackBufferWidth  = g_video_width;
+    pp.BackBufferHeight = g_video_height;
     pp.BackBufferFormat = D3DFMT_A8R8G8B8;
     pp.BackBufferCount  = 1;
     pp.MultiSampleType  = D3DMULTISAMPLE_NONE;
@@ -32,6 +53,10 @@ extern "C" int x360_platform_init(void) {
         D3DCREATE_HARDWARE_VERTEXPROCESSING,
         &pp, &g_dev);
     if (FAILED(hr) || !g_dev) return 0;
+
+    x360_log(g_video_width==1280 && g_video_height==720
+        ? "MK64VIDEO: 1280x720 framebuffer (HD path)\n"
+        : "MK64VIDEO: native SD framebuffer active (CRT/480 output)\n");
 
     QueryPerformanceFrequency(&g_clock_frequency);
     g_next_tick = 0;

@@ -222,7 +222,7 @@ itemBoxQuestionMarkModel:
   symbol: itemBoxQuestionMarkModel
   type: gfx
   offset: 0x3008
-  
+
 D_0D003090:
   symbol: D_0D003090
   type: gfx

@@ -126,4 +126,3 @@ Recompiling `.inc.c` files requires saving the root `.c` file for makefile to re
 2) `make clean` and rebuild
 3) `make my_file.c`
 4) Find help in the Discord
-

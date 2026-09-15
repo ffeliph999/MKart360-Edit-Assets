@@ -16,7 +16,7 @@ extract from [SURFACE_TYPE](@ref SURFACE_TYPE)
 | 8 | Grass | | |
 | 9 | Ice | | Sherbet Land |
 | 10 | Wet Sand | | Koopa Troopa Beach |
-| 11 | Snow Off-road | | | 
+| 11 | Snow Off-road | | |
 | 12 | Rock Walls | Also used for choco walls | Choco Mountain |
 | 13 | Dirt Off-road | | Kalimari Desert |
 | 14 | Track Ballast | The dirt used in railways | Kalimari Desert |
@@ -25,5 +25,5 @@ extract from [SURFACE_TYPE](@ref SURFACE_TYPE)
 | 17 | Wood Bridge | Solid wood | |
 | 252 | Boost Ramp | Locks speed to ~60km/h | Jungle Parkway |
 | 253 | Out of Bounds | Lakitu activates on touch | Jungle Parkway |
-| 254 | Gravity Ramp | Boost ramp that locks speed with reduced gravity | Royal Raceway | 
-| 255 | Walls/Ramps | Walls and ramps | Koopa Troopa Beach |  
+| 254 | Gravity Ramp | Boost ramp that locks speed with reduced gravity | Royal Raceway |
+| 255 | Walls/Ramps | Walls and ramps | Koopa Troopa Beach |

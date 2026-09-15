@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <defines.h>
@@ -3924,7 +3925,7 @@ void func_80033AE0(Player* player, struct Controller* controller, s8 playerIndex
                       0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
                       0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8 };
 
-    if ( 
+    if (
          (
            ((player->effects & HOP_EFFECT) != HOP_EFFECT) &&
            (
@@ -4034,7 +4035,7 @@ void func_80033AE0(Player* player, struct Controller* controller, s8 playerIndex
     }
 
     /*
-    This big group of function calls does 2 things. 
+    This big group of function calls does 2 things.
     First, when you steer it sets steer_position (which starts as just your x input) part way between your x input and your previous player->steerPosition
     (basically, you cannot go from full left to right steering instantaneously)
     Second, it sets the value of player->unk_090, which has to do with your karts sideways velocity. The code looks like it is intended
@@ -4098,7 +4099,7 @@ void func_80033AE0(Player* player, struct Controller* controller, s8 playerIndex
     update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 37,  (40 << 12) / steer_resistance_large_turn, 110);
     update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 36,  (36 << 12) / steer_resistance_large_turn, 110);
     update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 35,  (36 << 12) / steer_resistance_large_turn, 110);
-    update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 34,  (34 << 12) / steer_resistance_large_turn, 110); 
+    update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 34,  (34 << 12) / steer_resistance_large_turn, 110);
     update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 32,  (32 << 12) / steer_resistance_large_turn, 100); // this skips 33
     update_steering_large(player, &steer_position_delta, &steer_position, player->steerPosition, 31,  (32 << 12) / steer_resistance_large_turn, 100);
 
@@ -4767,6 +4768,11 @@ void handle_a_press_for_all_players_during_race(void) {
     u16 temp_v0_5;
     u16 temp_v0_6;
 
+    if(x360_net8_active()) {
+        int i;
+        for(i=0;i<x360_net_player_count();++i) handle_a_press_for_player_during_race(&gPlayers[i], &gControllers[i], i);
+        return;
+    }
     switch (gActiveScreenMode) {
         case SCREEN_MODE_1P:
             switch (gModeSelection) {

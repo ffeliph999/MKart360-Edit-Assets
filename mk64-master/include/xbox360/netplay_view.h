@@ -14,6 +14,16 @@ inline bool crop(int mode,int players,int slot,Rect &r){
 inline Rect output(bool widescreen) {
     Rect r={widescreen?0:160,0,widescreen?1280:960,720};return r;
 }
+/* X360_CRT_480I_NATIVE_BACKBUFFER:
+ * Match game aspect to physical display aspect in the 1280x720 logical
+ * coordinate space.  4:3-on-4:3 and 16:9-on-16:9 use the whole framebuffer. */
+inline Rect output(bool widescreen,bool physical_widescreen) {
+    Rect r={0,0,1280,720};
+    if(widescreen==physical_widescreen)return r;
+    if(!widescreen){r.x=160;r.w=960;}       /* 4:3 pillarbox on 16:9 */
+    else {r.y=90;r.h=540;}                  /* 16:9 letterbox on 4:3 */
+    return r;
+}
 inline Rect output_rect(Rect r,Rect out) {
     int right=out.x+(r.x+r.w)*out.w/1280;
     int bottom=out.y+(r.y+r.h)*out.h/720;

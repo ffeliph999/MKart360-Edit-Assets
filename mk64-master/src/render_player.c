@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #ifdef XBOX360_PORT
 #include "xbox360/assets.h"
 #include "xbox360/netplay.h"
@@ -980,6 +981,7 @@ void func_80022744(void) {
 }
 
 void func_8002276C(void) {
+    if(x360_net8_active()) {int i;for(i=0;i<x360_net_player_count();++i)func_80022A98(&gPlayers[i],(s8)i);return;}
     switch (gActiveScreenMode) { /* irregular */
         case SCREEN_MODE_1P:
             switch (gModeSelection) { /* switch 1; irregular */

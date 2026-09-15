@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <defines.h>
@@ -954,7 +955,7 @@ void check_player_use_item(void) {
     struct Controller* controller;
     struct Controller* loopController;
 
-    for (player = &gPlayers[0], loopController = &gControllers[0], target = &gControllers[4]; loopController != target;
+    for (player = &gPlayers[0], loopController = &gControllers[0], target = &gControllers[x360_net8_active()?x360_net_player_count():4]; loopController != target;
          player++, loopController++) {
         controller = loopController;
         if (prevent_item_use(player) == false) {

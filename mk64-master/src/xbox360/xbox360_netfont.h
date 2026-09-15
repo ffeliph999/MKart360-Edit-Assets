@@ -1,5 +1,6 @@
 #ifndef MK64_NETFONT_H
 #define MK64_NETFONT_H
+#include "xbox360/platform.h" /* X360_CRT_480I_NATIVE_BACKBUFFER */
 struct NetGlyph { char c; unsigned char row[7]; };
 static const NetGlyph net_glyphs[]={
 {'A',{0x0E,0x11,0x11,0x1F,0x11,0x11,0x11}},
@@ -48,11 +49,25 @@ static const NetGlyph net_glyphs[]={
 };
 static void net_text(IDirect3DDevice9 *dev,int x,int y,const char *s,int scale,DWORD color) {
     D3DRECT rects[2048];unsigned count=0;
+    const int sw=(int)x360_video_width(),sh=(int)x360_video_height();
+    /* The netplay UI is authored as 16:9. Preserve that UI aspect on a 4:3
+     * physical display; this does not affect gameplay presentation. */
+    const bool physical_wide=x360_video_widescreen()!=0;
+    const int virtual_y=physical_wide?0:90;
+    const int virtual_h=physical_wide?720:540;
     for(;*s&&x<1210;++s,x+=scale*6){const NetGlyph *g=0;
         for(unsigned i=0;i<sizeof(net_glyphs)/sizeof(net_glyphs[0]);++i)if(net_glyphs[i].c==*s){g=&net_glyphs[i];break;}
         if(!g)continue;
         for(int row=0;row<7;++row)for(int col=0;col<5;++col)if(g->row[row]&(1<<(4-col))){
-            D3DRECT r={x+col*scale,y+row*scale,x+(col+1)*scale,y+(row+1)*scale};rects[count++]=r;
+            int l=x+col*scale,t=y+row*scale,rgt=x+(col+1)*scale,btm=y+(row+1)*scale;
+            D3DRECT r={
+                (LONG)((l*sw+640)/1280),
+                (LONG)(((virtual_y+t*virtual_h/720)*sh+360)/720),
+                (LONG)((rgt*sw+640)/1280),
+                (LONG)(((virtual_y+btm*virtual_h/720)*sh+360)/720)
+            };
+            if(r.x2<=r.x1)r.x2=r.x1+1;if(r.y2<=r.y1)r.y2=r.y1+1;
+            rects[count++]=r;
             if(count==2048){dev->Clear(count,rects,D3DCLEAR_TARGET,color,1,0);count=0;}
         }
     }

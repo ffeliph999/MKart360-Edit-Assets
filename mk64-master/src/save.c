@@ -955,11 +955,11 @@ u8 func_800B68F4(s32 arg0) {
     u8 *addr = (u8*)(var_v0 + arg0);
     s32 i = 0;
     u32 checksum = 0;
-    
+
     for (i = 0; i < (s32)offsetof(struct_8018EE10_entry, pad_43); i++) {
         checksum += (addr[i] * (arg0 + 1)) + i;
     }
-    
+
     return checksum;
 }
 

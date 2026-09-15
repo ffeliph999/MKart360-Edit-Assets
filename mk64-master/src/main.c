@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #ifdef XBOX360_PORT
 #include "xbox360/netplay.h"
 #endif
@@ -127,7 +128,7 @@ s32 D_80150120;
 s32 gGotoMode;
 UNUSED s32 D_80150128;
 UNUSED s32 D_8015012C;
-f32 gCameraZoom[4]; // look like to be the fov of each character
+f32 gCameraZoom[8]; // look like to be the fov of each character
 UNUSED s32 D_80150140;
 UNUSED s32 D_80150144;
 f32 gScreenAspect;
@@ -150,7 +151,7 @@ Mat4 D_801502C0;
 
 s32 padding[2048];
 
-u16 D_80152300[4];
+u16 D_80152300[8];
 u16 D_80152308;
 
 UNUSED OSThread paddingThread;
@@ -620,9 +621,10 @@ void race_logic_loop(void) {
     s16 i;
     u16 rotY;
 
+    if(x360_net8_active()) x360_race8_controls();
     gMatrixObjectCount = 0;
     gMatrixEffectCount = 0;
-    if (gIsGamePaused != 0) {
+    if (gIsGamePaused != 0 && !x360_net8_active()) {
         func_80290B14();
     }
     if (gIsInQuitToMenuTransition != 0) {
@@ -641,7 +643,7 @@ void race_logic_loop(void) {
     switch (gActiveScreenMode) {
         case SCREEN_MODE_1P:
             gTickSpeed = 2;
-            replays_loop();
+            if(!x360_net8_active()) replays_loop();
             if (gIsGamePaused == 0) {
                 for (i = 0; i < gTickSpeed; i++) {
                     if (D_8015011E) {
@@ -650,7 +652,8 @@ void race_logic_loop(void) {
                     func_802909F0();
                     evaluate_collision_for_players_and_actors();
                     handle_a_press_for_all_players_during_race();
-                    func_8001EE98(gPlayerOneCopy, camera1, 0);
+                    if(x360_net8_active()) x360_race8_cameras();
+                    else func_8001EE98(gPlayerOneCopy, camera1, 0);
                     func_80028F70();
                     func_8028F474();
                     func_80059AC8();
@@ -664,7 +667,8 @@ void race_logic_loop(void) {
             sNumVBlanks = 0;
             profiler_log_thread5_time(LEVEL_SCRIPT_EXECUTE);
             D_8015F788 = 0;
-            render_player_one_1p_screen();
+            if(x360_net8_active()) x360_race8_render();
+            else render_player_one_1p_screen();
             if (!gEnableDebugMode) {
                 D_800DC514 = false;
             } else {
@@ -723,7 +727,8 @@ void race_logic_loop(void) {
                     func_802909F0();
                     evaluate_collision_for_players_and_actors();
                     handle_a_press_for_all_players_during_race();
-                    func_8001EE98(gPlayerOneCopy, camera1, 0);
+                    if(x360_net8_active()) x360_race8_cameras();
+                    else func_8001EE98(gPlayerOneCopy, camera1, 0);
                     func_80029060();
                     func_8001EE98(gPlayerTwoCopy, camera2, 1);
                     func_80029150();
@@ -777,7 +782,8 @@ void race_logic_loop(void) {
                     func_802909F0();
                     evaluate_collision_for_players_and_actors();
                     handle_a_press_for_all_players_during_race();
-                    func_8001EE98(gPlayerOneCopy, camera1, 0);
+                    if(x360_net8_active()) x360_race8_cameras();
+                    else func_8001EE98(gPlayerOneCopy, camera1, 0);
                     func_80029060();
                     func_8001EE98(gPlayerTwoCopy, camera2, 1);
                     func_80029150();
@@ -859,7 +865,8 @@ void race_logic_loop(void) {
                     func_802909F0();
                     evaluate_collision_for_players_and_actors();
                     handle_a_press_for_all_players_during_race();
-                    func_8001EE98(gPlayerOneCopy, camera1, 0);
+                    if(x360_net8_active()) x360_race8_cameras();
+                    else func_8001EE98(gPlayerOneCopy, camera1, 0);
                     func_80029158();
                     func_8001EE98(gPlayerTwo, camera2, 1);
                     func_800291E8();
@@ -1287,6 +1294,7 @@ void thread5_game_loop(UNUSED void* arg) {
     x360_log("MK64: game audio state initialization begins\n");
     func_800C5CB8();
     x360_log("MK64: game audio state ready\n");
+    if(x360_net8_active()) x360_race8_prepare();
 
     while (true) {
         if(gGlobalTimer<5)x360_log("MK64: loop audio update begins\n");
@@ -1294,6 +1302,7 @@ void thread5_game_loop(UNUSED void* arg) {
         func_800CB2C4();
         if(gGlobalTimer<5)x360_log("MK64: loop audio update complete\n");
 
+        if(x360_net8_active()) x360_race8_service();
         // Update the gamestate if it has changed (racing, menus, credits, etc.).
         if (gGamestateNext != gGamestate) {
             gGamestate = gGamestateNext;
@@ -1369,6 +1378,6 @@ unsigned int x360_net_state_hash(void) {
         h=net_hash_bytes(h,gPlayers[i].velocity,sizeof(gPlayers[i].velocity));
         h=net_hash_bytes(h,&gPlayers[i].lapCount,sizeof(gPlayers[i].lapCount));
         h=net_hash_bytes(h,&gPlayers[i].effects,sizeof(gPlayers[i].effects));
-    }return h;
+    }return x360_net8_active()?x360_race8_hash(h):h;
 }
 #endif

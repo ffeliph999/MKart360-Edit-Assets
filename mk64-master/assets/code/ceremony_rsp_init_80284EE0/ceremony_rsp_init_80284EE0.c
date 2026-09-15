@@ -100,4 +100,3 @@ Gfx D_80284EE0[] = {
 // WARNING: Overlap detected between 0x294530 and 0x284f70 with size 0xf5c0
 Gfx D_80284F70[] = {
 };
-

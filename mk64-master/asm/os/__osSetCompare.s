@@ -12,4 +12,3 @@ glabel __osSetCompare
      nop
 
     nop
-

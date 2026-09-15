@@ -111,7 +111,7 @@ void func_800AFC54(Vtx* vtx, s32 a, s32 b, s32 c, Vec3s out) {
     dx = ((varB2 - varA2) * (varC4 - varB4)) - ((varB4 - varA4) * (varC2 - varB2));
     dy = ((varB4 - varA4) * (varC0 - varB0)) - ((varB0 - varA0) * (varC4 - varB4));
     dz = ((varB0 - varA0) * (varC2 - varB2)) - ((varB2 - varA2) * (varC0 - varB0));
-    
+
     length = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
 
     if (length < 0.001) {

@@ -189,7 +189,7 @@ def GetAsmSize(path):
             asmLines = ReadAllLines(asmFilePath)
 
             # Checks each line if it starts with a comment, for context:
-            # split/splat programs generate assembly files with comments to 
+            # split/splat programs generate assembly files with comments to
             # provide additional information of the mips instruction such as:
             # /* Hex Location - Address location - Instruction in Hex */
             for asmLine in asmLines:

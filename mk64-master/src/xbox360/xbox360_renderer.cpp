@@ -9,6 +9,7 @@ extern "C" void x360_log(const char*);
 extern "C" {
 #include <PR/gbi.h>
 #include "xbox360/gfx_rendering_api.h"
+#include "xbox360/platform.h"
 }
 #include "xbox360_shader_source.h"
 #include "xbox360/netplay.h"
@@ -122,6 +123,21 @@ static void depth_test(bool e){IDirect3DDevice9*d=x360_d3d_device();if(d)d->SetR
 static void depth_mask(bool e){IDirect3DDevice9*d=x360_d3d_device();if(d)d->SetRenderState(D3DRS_ZWRITEENABLE,e);}
 static void zmode(bool e){IDirect3DDevice9*d=x360_d3d_device();if(d){float bias=e?-0.00001f:0;DWORD bits;memcpy(&bits,&bias,4);d->SetRenderState(D3DRS_DEPTHBIAS,bits);}}
 static int clamp_coordinate(int value,int low,int high){return value<low?low:(value>high?high:value);}
+/* X360_CRT_480I_NATIVE_BACKBUFFER:
+ * MK64/gfx_pc continues to think in 1280x720. Convert only the final D3D
+ * rectangles to the real Xbox framebuffer so the 720p path stays identical. */
+static mkview::Rect x360_framebuffer_rect(mkview::Rect logical){
+    const int sw=(int)x360_video_width(),sh=(int)x360_video_height();
+    int left=(logical.x*sw+640)/1280;
+    int right=((logical.x+logical.w)*sw+640)/1280;
+    int top=(logical.y*sh+360)/720;
+    int bottom=((logical.y+logical.h)*sh+360)/720;
+    left=clamp_coordinate(left,0,sw);right=clamp_coordinate(right,0,sw);
+    top=clamp_coordinate(top,0,sh);bottom=clamp_coordinate(bottom,0,sh);
+    if(logical.w>0&&right<=left&&left<sw)right=left+1;
+    if(logical.h>0&&bottom<=top&&top<sh)bottom=top+1;
+    mkview::Rect r={left,top,right-left,bottom-top};return r;
+}
 static void viewport(int x,int y,int w,int h){
     IDirect3DDevice9*d=x360_d3d_device();if(!d)return;
     const int screen_w=1280,screen_h=720;
@@ -133,7 +149,9 @@ static void viewport(int x,int y,int w,int h){
             message[sizeof(message)-1]=0;x360_log(message);++abnormal_primitive_log_count;}return;
     }
     active_viewport.x=left;active_viewport.y=top;active_viewport.width=right-left;active_viewport.height=bottom-top;
-    D3DVIEWPORT9 v={(DWORD)left,(DWORD)top,(DWORD)(right-left),(DWORD)(bottom-top),0,1};d->SetViewport(&v);
+    mkview::Rect logical={left,top,right-left,bottom-top};
+    mkview::Rect physical=x360_framebuffer_rect(logical);
+    D3DVIEWPORT9 v={(DWORD)physical.x,(DWORD)physical.y,(DWORD)physical.w,(DWORD)physical.h,0,1};d->SetViewport(&v);
 }
 static void scissor(int x,int y,int w,int h){
     IDirect3DDevice9*d=x360_d3d_device();if(!d)return;
@@ -142,7 +160,9 @@ static void scissor(int x,int y,int w,int h){
     int top=clamp_coordinate(screen_h-y-h,0,screen_h),bottom=clamp_coordinate(screen_h-y,0,screen_h);
     if(right<left)right=left;if(bottom<top)bottom=top;
     active_scissor.x=left;active_scissor.y=top;active_scissor.width=right-left;active_scissor.height=bottom-top;
-    RECT r={left,top,right,bottom};d->SetScissorRect(&r);
+    mkview::Rect logical={left,top,right-left,bottom-top};
+    mkview::Rect physical=x360_framebuffer_rect(logical);
+    RECT r={physical.x,physical.y,physical.x+physical.w,physical.y+physical.h};d->SetScissorRect(&r);
 }
 static void use_alpha(bool e){IDirect3DDevice9*d=x360_d3d_device();if(d){d->SetRenderState(D3DRS_ALPHABLENDENABLE,e);d->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);d->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);}}
 static void draw(float*buf,size_t len,size_t tris){
@@ -236,7 +256,17 @@ static void draw(float*buf,size_t len,size_t tris){
      * expands that viewport to the full 1280x720 Xbox output.
      */
     const bool x360_legacy_wide = x360_display_aspect() > 1.5f;
-    const mkview::Rect out = mkview::output(x360_legacy_wide);
+    const bool x360_physical_wide = x360_video_widescreen()!=0;
+    const bool x360_exact_legacy_hd_wide =
+        x360_legacy_wide && x360_physical_wide &&
+        x360_video_width()==1280 && x360_video_height()==720;
+    /* X360_ONLINE_MATCHED_ASPECT_FULLSCREEN_V1
+     * When the selected game aspect already matches the physical display
+     * (notably 4:3 on a 480i CRT), the online local view owns the complete
+     * physical framebuffer. */
+    const bool x360_matching_output_aspect =
+        x360_legacy_wide == x360_physical_wide;
+    const mkview::Rect out = mkview::output(x360_legacy_wide,x360_physical_wide);
     if(local){
         if(!local_view_logged){
             char message[192];
@@ -248,7 +278,7 @@ static void draw(float*buf,size_t len,size_t tris){
         if(!mkview::intersect(sc,vp,visible)||!mkview::intersect(visible,crop,visible)){
             if(selected_program!=batch)load_shader(selected_program);return;
         }
-        if (x360_legacy_wide) {
+        if (x360_exact_legacy_hd_wide) {
             /* Exact known-good B23/B23F 16:9 local fullscreen presentation. */
             D3DVIEWPORT9 full={0,0,1280,720,0,1};
             d->SetViewport(&full);
@@ -259,17 +289,31 @@ static void draw(float*buf,size_t len,size_t tris){
                 (visible.y+visible.h-crop.y)*720/crop.h
             };
             d->SetScissorRect(&clip);
+        } else if (x360_matching_output_aspect) {
+            /* Matching aspect: this console's selected online view is truly
+             * fullscreen.  Do not preserve a split-screen-derived scissor. */
+            const DWORD sw=(DWORD)x360_video_width();
+            const DWORD sh=(DWORD)x360_video_height();
+            D3DVIEWPORT9 full={0,0,sw,sh,0,1};
+            d->SetViewport(&full);
+            RECT clip={0,0,(LONG)sw,(LONG)sh};
+            d->SetScissorRect(&clip);
         } else {
-            /* 4:3 only: map the selected local view into the pillarbox area. */
+            /* Mismatched aspect only: retain pillarbox/letterbox mapping. */
+            mkview::Rect fbout=x360_framebuffer_rect(out);
             D3DVIEWPORT9 full={
-                (DWORD)out.x,(DWORD)out.y,(DWORD)out.w,(DWORD)out.h,0,1
+                (DWORD)fbout.x,(DWORD)fbout.y,(DWORD)fbout.w,(DWORD)fbout.h,0,1
             };
             d->SetViewport(&full);
-            RECT clip={
+            mkview::Rect logical_clip={
                 out.x+(visible.x-crop.x)*out.w/crop.w,
                 out.y+(visible.y-crop.y)*out.h/crop.h,
-                out.x+(visible.x+visible.w-crop.x)*out.w/crop.w,
-                out.y+(visible.y+visible.h-crop.y)*out.h/crop.h
+                (visible.w*out.w)/crop.w,
+                (visible.h*out.h)/crop.h
+            };
+            mkview::Rect fbclip=x360_framebuffer_rect(logical_clip);
+            RECT clip={
+                fbclip.x,fbclip.y,fbclip.x+fbclip.w,fbclip.y+fbclip.h
             };
             d->SetScissorRect(&clip);
         }
@@ -281,7 +325,7 @@ static void draw(float*buf,size_t len,size_t tris){
          * Never infer quads from six consecutive, potentially clipped vertices. */
         d->DrawPrimitiveUP(D3DPT_TRIANGLELIST,(UINT)tris,&local_view_vertices[0],packed_stride);
     }else{
-        if (x360_legacy_wide) {
+        if (x360_exact_legacy_hd_wide) {
             /*
              * Exact legacy 16:9 path from before the display-mode option:
              * no output_rect(), no second presentation transform.
@@ -293,17 +337,20 @@ static void draw(float*buf,size_t len,size_t tris){
             RECT clip={sc.x,sc.y,sc.x+sc.w,sc.y+sc.h};
             d->SetScissorRect(&clip);
         } else {
-            /* New 4:3 mode only. */
+            /* General aspect path. Logical viewport/scissor stay 1280x720;
+             * only their final D3D rectangles become framebuffer coordinates. */
             mkview::Rect mapped_vp=mkview::output_rect(vp,out);
             mkview::Rect mapped_sc=mkview::output_rect(sc,out);
+            mkview::Rect fbvp=x360_framebuffer_rect(mapped_vp);
+            mkview::Rect fbsc=x360_framebuffer_rect(mapped_sc);
             D3DVIEWPORT9 original={
-                (DWORD)mapped_vp.x,(DWORD)mapped_vp.y,
-                (DWORD)mapped_vp.w,(DWORD)mapped_vp.h,0,1
+                (DWORD)fbvp.x,(DWORD)fbvp.y,
+                (DWORD)fbvp.w,(DWORD)fbvp.h,0,1
             };
             d->SetViewport(&original);
             RECT clip={
-                mapped_sc.x,mapped_sc.y,
-                mapped_sc.x+mapped_sc.w,mapped_sc.y+mapped_sc.h
+                fbsc.x,fbsc.y,
+                fbsc.x+fbsc.w,fbsc.y+fbsc.h
             };
             d->SetScissorRect(&clip);
         }
@@ -320,7 +367,15 @@ static void init(void){
     d->SetRenderState(D3DRS_SCISSORTESTENABLE,TRUE);
 }
 static void resize(void){}
-static void start_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){D3DVIEWPORT9 full={0,0,1280,720,0,1};d->SetViewport(&full);RECT all={0,0,1280,720};d->SetScissorRect(&all);d->Clear(0,0,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff000000,1,0);d->BeginScene();}}
-static void end_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d)d->EndScene();}
+static void start_frame(void){
+    IDirect3DDevice9*d=x360_d3d_device();if(d){
+        const DWORD sw=(DWORD)x360_video_width(),sh=(DWORD)x360_video_height();
+        D3DVIEWPORT9 full={0,0,sw,sh,0,1};d->SetViewport(&full);
+        RECT all={0,0,(LONG)sw,(LONG)sh};d->SetScissorRect(&all);
+        d->Clear(0,0,D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xff000000,1,0);d->BeginScene();
+    }
+}
+extern "C" void x360_net8_draw_hud(void);
+static void end_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){x360_net8_draw_hud();d->EndScene();}}
 static void finish(void){}
 extern "C" struct GfxRenderingAPI gfx_xbox360_api={z01,unload_shader,load_shader,create_shader,lookup_shader,shader_info,new_tex,select_tex,upload_tex,sampler,depth_test,depth_mask,zmode,viewport,scissor,use_alpha,draw,init,resize,start_frame,end_frame,finish};

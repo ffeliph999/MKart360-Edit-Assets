@@ -1,5 +1,5 @@
 @page concepts Basic Concepts
-See [terminology](terminology.html) for explanations of terms.  
+See [terminology](terminology.html) for explanations of terms.
 
 # Addresses
 Computers use addresses to jump through code. This works similar to a house number.

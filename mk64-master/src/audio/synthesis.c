@@ -619,7 +619,7 @@ Acmd* func_800B86A0(Acmd* cmd, struct NoteSubEu* note, struct NoteSynthesisState
 
     sourceLeft = synthesisState->curVolLeft;
     sourceRight = synthesisState->curVolRight;
-    
+
     targetLeft = (note->targetVolLeft) << 4;
     targetRight = (note->targetVolRight) << 4;
 

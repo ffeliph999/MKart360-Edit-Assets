@@ -12,4 +12,3 @@ glabel osGetCount
      nop
 
     nop
-

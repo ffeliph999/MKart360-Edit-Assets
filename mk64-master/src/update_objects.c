@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #ifdef XBOX360_PORT
 #define X360_gTextureLakituSecondLap01 (x360_rom + 0x6DFAC0)
 #else
@@ -2946,6 +2947,10 @@ void course_update_clouds(s32 arg0) {
 }
 
 void func_80078F64(void) {
+    if(x360_net8_active()) {
+        int i; for(i=0;i<x360_net_player_count();++i) init_object(gIndexLakituList[i],1);
+        return;
+    }
     switch (gScreenModeSelection) { /* irregular */
         case SCREEN_MODE_1P:
             init_object(gIndexLakituList[0], 1);
@@ -3709,6 +3714,12 @@ u8 gen_random_item(s16 rank, s16 isCpu) {
     // sRandomItemIndex not initialized for further randomness?
     sRandomItemIndex = ((u32) rand + (sRandomItemIndex + gControllerRandom) + gRaceFrameCounter) % 100U;
 
+    if(x360_net8_active() && gModeSelection == VERSUS) {
+        curve=segmented_to_virtual((void*)common_grand_prix_human_item_curve);
+        if(rank<0)rank=0;
+        if(rank>7)rank=7;
+        return curve[rank*100+sRandomItemIndex];
+    }
     if (gModeSelection == VERSUS) {
         switch (gPlayerCountSelection1) {
             case TWO_PLAYERS_SELECTED:
@@ -3769,8 +3780,8 @@ s32 func_8007B040(s32 objectIndex, s32 playerId) {
     s32 var_t3;
     s32 temp_a0;
     s32 var_v1;
-    s32 sp50[4];
-    s32 sp40[4];
+    s32 sp50[8];
+    s32 sp40[8];
     s32 var_v1_2;
     Player* sp38;
     s16 temp_a1;
@@ -5569,7 +5580,7 @@ void func_8007F8D8(void) {
         }
     }
     if (var_s4 != 0) {
-        for (var_s0 = 0; var_s0 < 4; var_s0++, player++) {
+        for (var_s0 = 0; var_s0 < (x360_net8_active()?x360_net_player_count():4); var_s0++, player++) {
             if ((player->type & PLAYER_EXISTS) && !(player->type & PLAYER_CPU)) {
                 if (func_8007F75C(var_s0) != 0) {
                     break;
@@ -6898,6 +6909,18 @@ void update_hedgehogs(void) {
 
     for (var_s0 = 0; var_s0 < NUM_HEDGEHOGS; var_s0++) {
         temp_s1 = indexObjectList2[var_s0];
+        if(x360_net8_active()) {
+            int slot; float distance=1.0e30f;
+            for(slot=0;slot<x360_net_player_count();++slot) {
+                float dx=gObjectList[temp_s1].pos[0]-cameras[slot].pos[0];
+                float dz=gObjectList[temp_s1].pos[2]-cameras[slot].pos[2];
+                float d=dx*dx+dz*dz;if(d<distance)distance=d;
+            }
+            gObjectList[temp_s1].status &= ~0x00600020;
+            if(distance<1000000.0f)gObjectList[temp_s1].status |= 0x00200000;
+            if(distance<360001.0f)gObjectList[temp_s1].status |= 0x00400000;
+            if(distance<10001.0f)gObjectList[temp_s1].status |= 0x00000020;
+        }
         func_800833D0(temp_s1, var_s0);
         func_80083248(temp_s1);
         func_80083474(temp_s1);

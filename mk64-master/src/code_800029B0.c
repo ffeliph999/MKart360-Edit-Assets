@@ -233,7 +233,7 @@ void setup_race(void) {
 
     controller = gControllerOne;
 
-    for (i = 0; i < 7; i++, controller++) {
+    for (i = 0; i < 8; i++, controller++) {
         controller->rawStickX = 0;
         controller->rawStickY = 0;
         controller->buttonPressed = 0;

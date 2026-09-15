@@ -273,7 +273,7 @@ typedef struct {
     /* 0x0064 */ Vec3f unk_064;
     /* 0x0070 */ f32 boundingBoxSize;
     /* 0x0074 */ f32 unk_074;
-    /* 0x0078 */ s16 unk_078; // One source of angular velocity (turning / swerving) 
+    /* 0x0078 */ s16 unk_078; // One source of angular velocity (turning / swerving)
     /* 0x007A */ s16 unk_07A;
     /* 0x007C */ s32 steerPosition; // Where the kart is steering, related to joystick position. Basically, in [-53 to 53], but shifted 16 bits left
     /* 0x0080 */ f32 boostPower;
@@ -515,6 +515,6 @@ typedef struct {
     /* 0x83 */ s8 unk_83;
 } hud_player; // size = 0x84
 
-#define HUD_PLAYERS_SIZE 4
+#define HUD_PLAYERS_SIZE 8
 
 #endif

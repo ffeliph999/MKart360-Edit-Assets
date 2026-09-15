@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <ultra64.h>
 #include <macros.h>
 #include <defines.h>
@@ -112,10 +113,10 @@ s16 D_801633B0[12];
 s16 gPositionSwapTimer[12];
 s16 D_801633E0[12];
 s16 D_801633F8[12];
-s16 D_80163410[4];
-f32 D_80163418[4];
-f32 D_80163428[4];
-f32 D_80163438[4];
+s16 D_80163410[8];
+f32 D_80163418[8];
+f32 D_80163428[8];
+f32 D_80163438[8];
 s32 gPlayerPathIndex;
 f32 gPathStartZ;
 f32 gPreviousPlayerZ[10];
@@ -145,7 +146,7 @@ VehicleStuff gBoxTruckList[NUM_RACE_BOX_TRUCKS];
 VehicleStuff gSchoolBusList[NUM_RACE_SCHOOL_BUSES];
 VehicleStuff gTankerTruckList[NUM_RACE_TANKER_TRUCKS];
 VehicleStuff gCarList[NUM_RACE_CARS];
-s32 D_80163DD8[4];
+s32 D_80163DD8[8];
 BombKart gBombKarts[NUM_BOMB_KARTS_MAX];
 Collision D_80164038[NUM_BOMB_KARTS_MAX];
 struct unexpiredActors gUnexpiredActorsList[8];
@@ -165,7 +166,7 @@ s32 gNumPathPointsTraversed[10];
 s16 gGetPlayerByCharacterId[10];
 s32 D_8016448C;
 TrackPathPoint* gCurrentTrackPath;
-f32 D_80164498[4];
+f32 D_80164498[8];
 f32 gLapCompletionPercentByPlayerId[10];    // D_801644A8
 f32 gCourseCompletionPercentByPlayerId[10]; // D_801644D0
 s16 bInMultiPathSection[12];
@@ -179,21 +180,21 @@ s16* gPathExpectedRotation[4];
 s16* gTrackConsecutiveCurveCounts[4];
 u16 gPathIndexByPlayerId[12]; // D_801645B0
 u16 gPathCountByPathIndex[4]; // D_801645C8
-s32 D_801645D0[4];
+s32 D_801645D0[8];
 s16* gCurrentTrackConsecutiveCurveCountsPath;
-s32 D_801645E8[4];
-f32 D_801645F8[4];
-s32 D_80164608[4];
-f32 D_80164618[4];
-s32 D_80164628[4];
-f32 D_80164638[4];
-f32 D_80164648[4];
-f32 D_80164658[4];
-s16 gNearestPathPointByCameraId[4];
-s16 D_80164670[4];
-s16 D_80164678[4];
-s16 D_80164680[4];
-f32 D_80164688[4];
+s32 D_801645E8[8];
+f32 D_801645F8[8];
+s32 D_80164608[8];
+f32 D_80164618[8];
+s32 D_80164628[8];
+f32 D_80164638[8];
+f32 D_80164648[8];
+f32 D_80164658[8];
+s16 gNearestPathPointByCameraId[8];
+s16 D_80164670[8];
+s16 D_80164678[8];
+s16 D_80164680[8];
+f32 D_80164688[8];
 f32 D_80164698;
 f32 D_8016469C;
 f32 D_801646A0;
@@ -206,10 +207,10 @@ s32 D_801646B4;
 s32 D_801646B8;
 s32 D_801646BC;
 // end padding
-s16 D_801646C0[4];
+s16 D_801646C0[8];
 u32 D_801646C8;
 u16 D_801646CC;
-UnkStruct_46D0 D_801646D0[4];
+UnkStruct_46D0 D_801646D0[8];
 
 // Strings, presented by google translate!
 // Note that these are EUC-JP encoded, see:
@@ -2272,7 +2273,7 @@ void func_80014DE4(s32 cameraIndex) {
         D_80164678[cameraIndex] = 0;
     }
 
-    for (cameraId = 0; cameraId < 4; cameraId++) {
+    for (cameraId = 0; cameraId < 8; cameraId++) {
         gNearestPathPointByCameraId[cameraId] = 0;
     }
 }

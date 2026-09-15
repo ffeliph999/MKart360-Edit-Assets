@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 #include <defines.h>
 #include <mk64.h>
 #include <course.h>
@@ -846,6 +847,7 @@ void func_8003C0F0(void) {
     s16 sp5A;
     s32 temp;
     UNUSED s32 pad[4];
+    if(x360_net8_active()) { x360_race8_spawn(); return; }
     switch (gCurrentCourseId) {
         case COURSE_MARIO_RACEWAY:
         case COURSE_CHOCO_MOUNTAIN:
@@ -1199,7 +1201,12 @@ void func_8003D080(void) {
     } else {
         func_8003C0F0();
     }
-    if (!gDemoMode) {
+    if(x360_net8_active()) {
+        int i;
+        for(i=0;i<x360_net_player_count();++i) {
+            camera_init(gPlayers[i].pos[0],gPlayers[i].pos[1],gPlayers[i].pos[2],gPlayers[i].rotation[1],gModeSelection==BATTLE?9:1,i);
+        }
+    } else if (!gDemoMode) {
         switch (gActiveScreenMode) {
             case SCREEN_MODE_1P:
                 switch (gModeSelection) {

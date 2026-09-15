@@ -15,6 +15,18 @@
 #include "cpu_vehicles_camera_path.h"
 #include "menu_items.h"
 #include "seq_ids.h"
+#ifdef XBOX360_PORT
+#include "xbox360/netplay.h"
+#include "xbox360/netplay_audio.h"
+extern s32 gGamestate;
+static int x360_audio_player(void) {
+    return mk_audio_local_player(x360_net_active(), gGamestate == RACING,
+                                x360_net_player_count(), x360_net_local_slot());
+}
+#else
+#define x360_audio_player() (-1)
+#endif
+
 
 s8 D_8018EF10;
 UnkStruct8018EF18 D_8018EF18[16];
@@ -42,35 +54,39 @@ u32 D_80192CD0[256];
 struct_D_801930D0_entry D_801930D0[3];
 
 u8 D_800E9DA0 = 0;
-UNUSED s32 D_800E9DA4[] = { 0, 0, 0, 0 };
-s32 D_800E9DB4[] = { 0, 0, 0, 0 };
-f32 D_800E9DC4[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-f32 D_800E9DD4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9DE4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+UNUSED s32 D_800E9DA4[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+s32 D_800E9DB4[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+f32 D_800E9DC4[8] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+f32 D_800E9DD4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9DE4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 f32 D_800E9DF4[] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-s32 D_800E9E14[] = { 0, 0, 0, 0 };
-s32 D_800E9E24[] = { 0, 0, 0, 0 };
+s32 D_800E9E14[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+s32 D_800E9E24[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 s32 D_800E9E34[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-f32 D_800E9E54[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9E64[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-s32 D_800E9E74[] = { 0, 0, 0, 0 };
-s32 D_800E9E84[] = { 0, 0, 0, 0 };
-u32 D_800E9E94[] = { 0, 0, 0, 0 };
-s32 D_800E9EA4[] = { 0, 0, 0, 0 };
-f32 D_800E9EB4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9EC4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9ED4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9EE4[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800E9EF4[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-f32 D_800E9F04[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-f32 D_800E9F14[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+f32 D_800E9E54[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9E64[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+s32 D_800E9E74[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+s32 D_800E9E84[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+u32 D_800E9E94[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+s32 D_800E9EA4[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+f32 D_800E9EB4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9EC4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9ED4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9EE4[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800E9EF4[8] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+f32 D_800E9F04[8] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+f32 D_800E9F14[8] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 u8 D_800E9F24[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 u8 D_800E9F2C[NUM_PLAYERS] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 f32 D_800E9F34[] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 f32 D_800E9F54[] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-u8 D_800E9F74[] = { 0, 0, 0, 0 };
-u8 D_800E9F78[] = { 0, 0, 0, 0 };
-struct Unk_800E9F7C D_800E9F7C[] = {
+u8 D_800E9F74[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+u8 D_800E9F78[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+struct Unk_800E9F7C D_800E9F7C[8] = {
+    { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
+    { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
+    { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
+    { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
     { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
     { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
     { { 0.0f, 0.0f, 0.0f }, 1.0f, 1.0f, 0, 3800.0f, 3.4f, 0.4f, -1.0f, 0.4f, 1100.0f, 630.0f, 3600.0f, 1.0f },
@@ -80,15 +96,15 @@ struct Unk_800EA06C D_800EA06C[] = { { { 0.0f, 1.0f, 1.0f }, 0 }, { { 0.0f, 1.0f
                                      { { 0.0f, 1.0f, 1.0f }, 0 }, { { 0.0f, 1.0f, 1.0f }, 0 },
                                      { { 0.0f, 1.0f, 1.0f }, 0 }, { { 0.0f, 1.0f, 1.0f }, 0 },
                                      { { 0.0f, 1.0f, 1.0f }, 0 }, { { 0.0f, 1.0f, 1.0f }, 0 } };
-u8 D_800EA0EC[] = { 0, 0, 0, 0 };
+u8 D_800EA0EC[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 u8 D_800EA0F0 = 0;
 u8 D_800EA0F4 = 0;
 UNUSED Vec3f D_800EA0F8 = { 0.0f, 0.0f, 1.0f };
 u8 D_800EA104 = 0;
 u8 D_800EA108 = 0;
-u8 D_800EA10C[] = { 0, 0, 0, 0 };
-f32 D_800EA110[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-f32 D_800EA120[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+u8 D_800EA10C[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+f32 D_800EA110[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+f32 D_800EA120[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 f32 D_800EA130[] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 f32 D_800EA150 = 1.4f;
 u8 D_800EA154[] = { 2, 2, 88, 90, 3, 48, 88, 48 };
@@ -97,7 +113,7 @@ u16 D_800EA160 = 0;
 u8 D_800EA164 = 0;
 s8 D_800EA168 = 0;
 s8 D_800EA16C = 0;
-u8 D_800EA170[] = { 0, 0, 0, 0 };
+u8 D_800EA170[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 u16 D_800EA174 = 0;
 f32 D_800EA178 = 1.0f;
 f32 D_800EA17C = 0.85f;
@@ -423,6 +439,12 @@ void func_800C1F8C(void) {
     u8 cameraId;
     Camera** camera;
 
+#ifdef XBOX360_PORT
+    if (x360_audio_player() >= 0) {
+        /* Audio camera zero is this console's viewport, never another listener. */
+        gCopyCamera[0] = &cameras[x360_audio_player()];
+    }
+#endif
     var_a1 = D_800EA1C0 + 1;
     for (var_s1 = 0; var_s1 < var_a1; var_s1++) {
         gVelocityCamera[var_s1][0] = gCopyCamera[var_s1]->pos[0] - gCameraLastPos[var_s1][0];
@@ -451,7 +473,7 @@ void func_800C1F8C(void) {
             camera = &gCopyCamera[cameraId];
             func_800C1DA4(*camera, (*camera)->rot, &D_8018EFD8[var_s1]);
             if (D_800EA1C8 != D_8018EFD8[var_s1].velX) {
-                func_800C1E2C(*camera, gVelocityCamera[0], &D_8018EFD8[var_s1]);
+                func_800C1E2C(*camera, gVelocityCamera[cameraId], &D_8018EFD8[var_s1]);
             }
             var_a1 = var_s1;
         }
@@ -502,7 +524,7 @@ void func_800C2274(u8 player) {
 
     var_a2 = 0xF;
     if (gSequencePlayers[player].enabled != 0) {
-        switch (gScreenModeSelection) { /* irregular */
+        switch (x360_audio_player() >= 0 ? 0 : gScreenModeSelection) { /* audio layout */
             case 0:
                 break;
             case 1:
@@ -594,6 +616,19 @@ void func_800C2474(void) {
         gPlayers[var_v0].oobProps = 0;
         D_8018FC10[var_v0][0] = 0x00FF;
         D_8018FC10[var_v0][1] = 0;
+        D_800EA10C[var_v0] = 0;
+        D_800E9F74[var_v0] = 0;
+        D_800E9F78[var_v0] = 0;
+    }
+    for (var_v0 = 4; var_v0 < 8; var_v0++) {
+        D_800E9DB4[var_v0] = 0;
+        D_800E9DF4[var_v0] = 0.0f;
+        D_800EA0EC[var_v0] = 0;
+        D_800E9EA4[var_v0] = 0;
+        D_800E9F7C[var_v0].unk_14 = 0;
+        D_800E9E74[var_v0] = 0;
+        D_800E9E84[var_v0] = 0;
+        D_800E9E94[var_v0] = 0;
         D_800EA10C[var_v0] = 0;
         D_800E9F74[var_v0] = 0;
         D_800E9F78[var_v0] = 0;
@@ -879,6 +914,7 @@ void func_800C2A2C(u32 cmd) {
         case 15:
             seqId = cmd & 0xFF;
             subArgs = (cmd & 0xFF00) >> 8;
+            if (x360_audio_player() >= 0) subArgs = 0;
             D_800EA1C0 = subArgs;
             audio_reset_session_eu((void*) seqId);
             D_800EA1F4[0] = seqId;
@@ -1226,7 +1262,20 @@ void play_sound(u32 soundBits, Vec3f* position, u8 cameraId, f32* arg3, f32* arg
     u8 bank;
     struct Sound* temp_v0;
 
+    /* Direct player cues are private. World emitters already use listener space.
+     * Test the source pointer, not cameraId: global/UI sounds use IDs 0 and 4. */
+    if (x360_audio_player() >= 0) {
+        int source;
+        for (source = 0; source < 8; ++source) {
+            if (position == &D_800E9F7C[source].pos) {
+                if (source != x360_audio_player()) return;
+                break;
+            }
+        }
+        cameraId = 0;
+    }
     bank = soundBits >> 0x1C;
+    if (bank >= SOUND_BANK_COUNT) return;
     if (sSoundBankDisabled[bank] == false) {
         temp_v0 = &sSoundRequests[sSoundRequestCount];
         temp_v0->soundBits = soundBits;
@@ -1797,7 +1846,7 @@ void sound_init(void) {
 
 void func_800C5BD0(void) {
     if (D_800EA1C0 == 0) {
-        func_800CBBE8(((D_800EA154[gPlayers[0].characterId] & 0xFFFF) << 8) | 0xF3000000, 0);
+        func_800CBBE8(((D_800EA154[gPlayers[x360_audio_player() >= 0 ? x360_audio_player() : 0].characterId] & 0xFFFF) << 8) | 0xF3000000, 0);
     } else {
         func_800CBBE8(0xF3004D00, 0);
     }
@@ -2399,11 +2448,11 @@ void func_800C70A8(u8 playerId) {
     }
 }
 
-/* 
+/*
    Routine to tell the game which "finish" music to play depending on which mode the player is in (Grand Prix, Time Trials, etc),
    whether the game is in multiplayer or not, and which position they ended up finishing in (1st, 2nd, 3rd, etc)
 
-   Contains a LOT of inlined funcs. 
+   Contains a LOT of inlined funcs.
    Modify if you dare.
 */
 void func_800C76C0(u8 playerId) {
@@ -2417,6 +2466,17 @@ void func_800C76C0(u8 playerId) {
             func_800C9018(playerId, SOUND_ARG_LOAD(0x01, 0x00, 0xFA, 0x4C));
             func_800C5578(&D_800E9F7C[playerId].pos, D_800E9E94[playerId]);
             D_800E9E74[playerId] = 0;
+#ifdef XBOX360_PORT
+            if (x360_audio_player() >= 0 && (gModeSelection == VERSUS || gModeSelection == BATTLE)) {
+                int won = gModeSelection == BATTLE ? gPlayerWinningIndex == playerId : gPlayers[playerId].currentRank == 0;
+                func_800C3448(0x100100FF);
+                func_800C3448(0x110100FF);
+                D_800EA0EC[playerId] = 2;
+                func_800C9060(playerId, 0x1900F103U);
+                play_sequences(won ? SEQ_EVENT_RACE_FINISH_FIRST : SEQ_EVENT_RACE_FINISH_OTHER,
+                               won ? SEQ_MENU_RESULTS_SCREEN_WIN_VS : SEQ_MENU_RESULTS_SCREEN_LOSE);
+            } else
+#endif
             switch (gModeSelection) { /* irregular */
                 case GRAND_PRIX:
                     D_800EA0EC[playerId] = 2;
@@ -2814,25 +2874,25 @@ void func_800C8AE4(void) {
         } else {
             switch (D_800EA1C0) { /* irregular */
                 case 0:
-                    if (D_800E9F7C[0].unk_14 != 0) {
+                    if (D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
                     }
                     break;
                 case 1:
-                    if ((D_800E9F7C[0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0)) {
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
                     }
                     break;
                 case 2:
-                    if ((D_800E9F7C[0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0)) {
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
                     }
                     break;
                 case 3:
-                    if ((D_800E9F7C[0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0) ||
+                    if ((D_800E9F7C[x360_audio_player() >= 0 ? x360_audio_player() : 0].unk_14 != 0) || (D_800E9F7C[1].unk_14 != 0) || (D_800E9F7C[2].unk_14 != 0) ||
                         (D_800E9F7C[3].unk_14 != 0)) {
                         D_800EA17C = 0.0f;
                         D_800EA184 = 1;
@@ -2850,7 +2910,8 @@ void func_800C8C7C(u8 arg0) {
 void func_800C8CCC() {
     u8 var_s0;
 
-    for (var_s0 = 0; var_s0 < D_800EA1C0 + 1; var_s0++) {
+    for (var_s0 = (x360_audio_player() >= 0 ? x360_audio_player() : 0);
+         var_s0 < (x360_audio_player() >= 0 ? x360_audio_player() + 1 : D_800EA1C0 + 1); var_s0++) {
         func_800C5D04(var_s0);
         func_800C5E38(var_s0);
         func_800C6108(var_s0);
@@ -2862,7 +2923,7 @@ void func_800C8CCC() {
         func_800C847C(var_s0);
         func_800C86D8(var_s0);
     }
-    if (gModeSelection == GRAND_PRIX) {
+    if (gModeSelection == GRAND_PRIX || x360_audio_player() >= 0) {
         for (var_s0 = 0; var_s0 < 8; var_s0++) {
             func_800C8770(var_s0);
             func_800C8C7C(var_s0);
@@ -2933,6 +2994,10 @@ void func_800C9060(u8 playerId, u32 soundBits) {
 }
 
 void func_800C90F4(u8 playerId, u32 soundBits) {
+    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+        func_800C92CC(playerId, soundBits - gPlayers[playerId].characterId * 0x10);
+        return;
+    }
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerId]) {
             case 2:
@@ -2988,6 +3053,10 @@ void func_800C92CC(u8 playerId, u32 soundBits) {
 
 void func_800C94A4(u8 playerId) {
     u32 var_a0;
+    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+        func_800C9A88(playerId);
+        return;
+    }
 
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerId]) {
@@ -3079,6 +3148,10 @@ void func_800C94A4(u8 playerId) {
 }
 
 void func_800C97C4(u8 arg0) {
+    if (x360_audio_player() >= 0 && arg0 != x360_audio_player()) {
+        func_800C9D0C(arg0);
+        return;
+    }
     func_800C5578(&D_800E9F7C[arg0].pos, gPlayers[arg0].characterId + SOUND_ARG_LOAD(0x01, 0x04, 0xFF, 0x00));
     func_800C5578(&D_800E9F7C[arg0].pos, gPlayers[arg0].characterId + SOUND_ARG_LOAD(0x01, 0x04, 0xFF, 0x14));
     func_800C5578(&D_800E9F7C[arg0].pos, gPlayers[arg0].characterId + SOUND_ARG_LOAD(0x01, 0x04, 0xFF, 0x2E));
@@ -3251,6 +3324,7 @@ void func_800CA0E4(void) {
 }
 
 void func_800CA118(u8 arg0) {
+    if (x360_audio_player() >= 0 && arg0 != x360_audio_player()) return;
     D_800EA0EC[arg0] = 1;
     D_800E9EA4[arg0] = 1;
     switch (D_800EA1C0) { /* irregular */
@@ -3329,6 +3403,7 @@ void play_sequences(u16 first, u16 second) {
 }
 
 void func_800CA49C(u8 playerIndex) {
+    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
     if (D_800EA108 == 0) {
         if (D_800EA1C0 >= 2) {
             func_800C9060(playerIndex, 0x1900FF3A);
@@ -3349,6 +3424,10 @@ void func_800CA49C(u8 playerIndex) {
 }
 
 void func_800CA59C(u8 playerId) {
+    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) {
+        func_800CA984(playerId);
+        return;
+    }
     if ((D_800EA0EC[playerId] == 0) && (D_800EA108 == 0)) {
         play_sound((gPlayers[playerId].characterId * 0x10) + 0x29008001, &D_800E9F7C[playerId].pos, playerId,
                    &D_800EA1D4, &D_800EA1D4, (s8*) &D_800E9F7C[playerId].unk_14);
@@ -3376,6 +3455,10 @@ void func_800CA59C(u8 playerId) {
 }
 
 void func_800CA730(u8 playerIndex) {
+    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) {
+        func_800CAACC(playerIndex);
+        return;
+    }
     if (D_800EA0EC[playerIndex] == 0) {
         if ((D_800EA108 == 0) && (D_800EA10C[playerIndex] != 0)) {
             play_sound(gPlayers[playerIndex].characterId * 0x10 + SOUND_ARG_LOAD(0x29, 0x00, 0x80, 0x08),
@@ -3468,7 +3551,7 @@ void func_800CAC08() {
 void func_800CAC60(UNUSED u8 arg0) {
     if ((D_800EA108 == 0) && (D_800EA0F0 == 0)) {
         play_sound(SOUND_ACTION_EXPLOSION_2, &D_800EA1C8, 0U, &D_800EA1D4, &D_800EA1D4, &D_800EA1DC);
-        if ((D_800EA10C[0] != 1) && (D_800EA10C[1] != 1)) {
+        if (x360_audio_player() >= 0 ? D_800EA10C[x360_audio_player()] != 1 : ((D_800EA10C[0] != 1) && (D_800EA10C[1] != 1))) {
             func_800C36C4(0, 1, 0x37U, 5);
             play_sound(SOUND_ITEM_THUNDERBOLT, &D_800EA1C8, 0U, &D_800EA1D4, &D_800EA1D4, &D_800EA1DC);
             D_800EA168 = 1;
@@ -3478,7 +3561,7 @@ void func_800CAC60(UNUSED u8 arg0) {
 
 void func_800CAD40(UNUSED s32 arg0) {
     if (D_800EA108 == 0) {
-        if ((D_800EA170[0] == 0) && (D_800EA170[1] == 0) && (D_800EA170[2] == 0) && (D_800EA170[3] == 0)) {
+        if (x360_audio_player() >= 0 ? D_800EA170[x360_audio_player()] == 0 : ((D_800EA170[0] == 0) && (D_800EA170[1] == 0) && (D_800EA170[2] == 0) && (D_800EA170[3] == 0))) {
             func_800C36C4(0, 1, 0x7FU, 0x19);
         }
         func_800C56F0(SOUND_ITEM_THUNDERBOLT);
@@ -3487,6 +3570,7 @@ void func_800CAD40(UNUSED s32 arg0) {
 }
 
 void func_800CADD0(u8 playerIndex, f32 arg1) {
+    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerIndex]) {
             case 2:
@@ -3511,6 +3595,7 @@ void func_800CADD0(u8 playerIndex, f32 arg1) {
 }
 
 void func_800CAEC4(u8 playerId, f32 arg1) {
+    if (x360_audio_player() >= 0 && playerId != x360_audio_player()) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerId]) {
             case 2:
@@ -3535,6 +3620,7 @@ void func_800CAEC4(u8 playerId, f32 arg1) {
 }
 
 void func_800CAFC0(u8 playerIndex) {
+    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
     if (D_800EA108 == 0) {
         switch (D_800EA0EC[playerIndex]) {
             case 2:
@@ -3550,6 +3636,7 @@ void func_800CAFC0(u8 playerIndex) {
 }
 
 void func_800CB064(u8 playerIndex) {
+    if (x360_audio_player() >= 0 && playerIndex != x360_audio_player()) return;
     if (D_800EA108 == 0) {
         if (D_800EA170[playerIndex] == 1) {
             if ((u8) D_800EA168 == 0) {
@@ -3627,6 +3714,6 @@ void func_800CB2C4() {
     func_800C5848();
     func_800C59C4();
     func_800C8CCC();
-    func_800C2274(0);
+    if (x360_audio_player() < 0) func_800C2274(0);
     func_800CBC24();
 }

@@ -470,7 +470,7 @@ void apply_driving_near_spinout_effect(Player* player, s8 playerIndex) {
     swerve_timer++;
 
     // Standard physics formula: Velo_current = velo_init + (accel_init * time) + (accel_jerk * time**2) / 2
-    swerve_velo_current = (swerve_accel_init * swerve_timer) - (0.1 * (swerve_timer * swerve_timer)); 
+    swerve_velo_current = (swerve_accel_init * swerve_timer) - (0.1 * (swerve_timer * swerve_timer));
 
     // Once one swerve finishes, setup to start a smaller one in the opposite direction
     if ((swerve_timer != 0) && (swerve_velo_current < 0)) { // (10 * swerve_accel_init < swerve_timer))
@@ -1733,36 +1733,36 @@ void func_80090178(Player* player, s8 playerId, Vec3f arg2, Vec3f arg3) {
             arg3[2] = temp_v1->posZ;
             break;
         case COURSE_BLOCK_FORT:
-            arg2[0] = spF8[playerId];
+            arg2[0] = spF8[playerId & 3];
             arg2[1] = 0.0f;
-            arg2[2] = spE8[playerId];
-            arg3[0] = spD8[playerId];
+            arg2[2] = spE8[playerId & 3];
+            arg3[0] = spD8[playerId & 3];
             arg3[1] = 0.0f;
-            arg3[2] = spC8[playerId];
+            arg3[2] = spC8[playerId & 3];
             break;
         case COURSE_SKYSCRAPER:
-            arg2[0] = spB8[playerId];
+            arg2[0] = spB8[playerId & 3];
             arg2[1] = 480.0f;
-            arg2[2] = spA8[playerId];
-            arg3[0] = sp98[playerId];
+            arg2[2] = spA8[playerId & 3];
+            arg3[0] = sp98[playerId & 3];
             arg3[1] = 480.0f;
-            arg3[2] = sp88[playerId];
+            arg3[2] = sp88[playerId & 3];
             break;
         case COURSE_DOUBLE_DECK:
-            arg2[0] = sp78[playerId];
+            arg2[0] = sp78[playerId & 3];
             arg2[1] = 0.0f;
-            arg2[2] = sp68[playerId];
-            arg3[0] = sp58[playerId];
+            arg2[2] = sp68[playerId & 3];
+            arg3[0] = sp58[playerId & 3];
             arg3[1] = 0.0f;
-            arg3[2] = sp48[playerId];
+            arg3[2] = sp48[playerId & 3];
             break;
         case COURSE_BIG_DONUT:
-            arg2[0] = sp38[playerId];
+            arg2[0] = sp38[playerId & 3];
             arg2[1] = 200.0f;
-            arg2[2] = sp28[playerId];
-            arg3[0] = sp18[playerId];
+            arg2[2] = sp28[playerId & 3];
+            arg3[0] = sp18[playerId & 3];
             arg3[1] = 200.0f;
-            arg3[2] = sp08[playerId];
+            arg3[2] = sp08[playerId & 3];
             break;
         default:
             test = player->nearestPathPointId;

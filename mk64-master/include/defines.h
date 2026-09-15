@@ -330,17 +330,17 @@ enum PLACE { FIRST_PLACE, SECOND_PLACE, THIRD_PLACE, FOURTH_PLACE };
  */
 #define MAX_TIME 0x927C0
 
-/* The codebase uses 16-bit representations of angles (either u16 or s16 depending on context). 
-   Thus, values of [0, 2**16 - 1] (for u16) or [-2**15, 2**15 - 1] (for s16) represent evenly 
+/* The codebase uses 16-bit representations of angles (either u16 or s16 depending on context).
+   Thus, values of [0, 2**16 - 1] (for u16) or [-2**15, 2**15 - 1] (for s16) represent evenly
    spaced angles around a circle. (e.g. (u16) 0x8000 is 2**15, which represents half a circle, or 180 degrees)
-   
+
    However, it is clear that the developers were thinking in terms of degrees and often worked
    with values that corresponded to a specific number of degrees. The DEGREES macro converts
    from the specified number of degrees to the 16-bit representation. This allows readers to
    think in degrees while leaving the compiled machine code unaffected.
 
-   Note that 2**16 / 360 is not an integer. It has a value of ~182.04, but is rounded to 182 
-   by the DEGREES function. There is some inconsistency with how the codebase handles this. 
+   Note that 2**16 / 360 is not an integer. It has a value of ~182.04, but is rounded to 182
+   by the DEGREES function. There is some inconsistency with how the codebase handles this.
    e.g. 70 degrees might be represented as DEGREES(70) or 70 * DEGREES(1), which are slightly
    different values due to this rounding. As a practical matter, this rounding is less than
    0.1 degrees in all cases */
@@ -349,7 +349,7 @@ enum PLACE { FIRST_PLACE, SECOND_PLACE, THIRD_PLACE, FOURTH_PLACE };
 // player->unk_046
 
 /* The first time you touch a penguin or bat, and anytime you touch a thwomp during a
-   race will set a flag which will cause your next spinout to be instant (i.e. no 
+   race will set a flag which will cause your next spinout to be instant (i.e. no
    sliding forward). Probably half-implemented code to prevent sliding through enemies,
    but causes this bug */
 #define CRITTER_TOUCH 0x2 // Touched a penguin, bat or thwomp
@@ -370,7 +370,7 @@ enum PLACE { FIRST_PLACE, SECOND_PLACE, THIRD_PLACE, FOURTH_PLACE };
 flag broken into 8 groups of 4 bits. Those 4 bits affect how each of the 8 players
 appear to the specified player */
 #define CHANGING_ANIMATION 0x1 // Seems to be set when the kart animation has to change.
-#define UNK_002_UNKNOWN_0x2 0x2 
+#define UNK_002_UNKNOWN_0x2 0x2
 #define UNK_002_UNKNOWN_0x4 0x4 /* Unclear, but has to do with viewing the side of player. At least tends to change if target
 player spins. Something  with avoding rollover of aniamation frame data? */
 #define SIDE_OF_KART 0x8 // Seems to be whether you are in a rectangle shooting out from both sides of target player

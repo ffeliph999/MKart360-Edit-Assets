@@ -26,7 +26,7 @@ OUTPUT_ARCH (mips)
 #define BEGIN_NOLOAD(name) \
     _##name##SegmentNoloadStart = ADDR(.name.noload); \
     .name.noload (NOLOAD) :
-	
+
 #define END_NOLOAD(name) \
     _##name##SegmentNoloadEnd = ADDR(.name.noload) + SIZEOF(.name.noload);
 
@@ -375,7 +375,7 @@ SECTIONS
       . = ALIGN(0x10);
    }
    END_NOLOAD(memoryPool)
-   
+
    /* 0x8028DF00 0F7510-123640 [2C130] */
    BEGIN_SEG(racing, LINKER_RACING)
    {
@@ -609,7 +609,7 @@ SECTIONS
    COURSE_OFFSETS_SEG(big_donut,course_big_donut_offsets)
 
    /* Segment 0xF Course Geography (0x4 uncompressed) and Segment 0x7 Packed Displaylists */
-   
+
    #define COURSE_VERT_SEG(dir, name) \
       BEGIN_SEG(name, 0x0F000000) \
       { \

@@ -62,4 +62,3 @@ UNUSED void func_800914E0(void) {
     camera->rot[0] = atan2s(sqrtf((sp38 * sp38) + (sp30 * sp30)), sp34);
     camera->rot[2] = 0;
 }
-

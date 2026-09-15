@@ -1,3 +1,4 @@
+#include "xbox360/race8.h"
 /**
  * @file code_80057C60.c
  * @warning there are too many variables here
@@ -184,7 +185,7 @@ bool8 D_801657F0;
 UNUSED s32 D_801657F4;
 bool8 D_801657F8;
 s32 D_801657FC;
-s8 D_80165800[2];
+s8 D_80165800[8];
 s32 D_80165804;
 s8 D_80165808;
 s32 D_8016580C;
@@ -258,10 +259,10 @@ Mtx D_80183D60;
  * this variable, but it appears to go unreferenced
  **/
 s32 D_80183DA0;
-f32 D_80183DA8[4];
+f32 D_80183DA8[8];
 //! Lakitu?
-s32 gIndexLakituList[4];
-f32 D_80183DC8[4];
+s32 gIndexLakituList[8];
+f32 D_80183DC8[8];
 //! Indexes for the objects associated with the Bomb Karts
 s32 gIndexObjectBombKart[NUM_BOMB_KARTS_MAX];
 UNUSED s32 D_80183DF8[16];
@@ -281,7 +282,7 @@ Vec3f D_80183E70;
 s32 gNextFreeLeafParticle;
 Vec3su D_80183E80;
 //! Appears to be a list of object list indices for the Item Window part of the HUD
-s32 gItemWindowObjectByPlayerId[4];
+s32 gItemWindowObjectByPlayerId[8];
 Vec3su D_80183E98;
 /**
  * Snowmen bodies in FrappeSnowland
@@ -310,7 +311,7 @@ s32 indexObjectList2[32];
  * I'm also not certain about its dimensions
  * I think the entires in this array are way over-sized
  */
-u8 D_80183FA8[4][0x2000];
+u8 D_80183FA8[8][0x2000];
 /**
  * Boos in Banshee Boardwalk
  * Spawners for the 4 small fire breaths inside Bowser's Castle
@@ -323,7 +324,7 @@ u8* gLakituTexturePtr;
  */
 s32 indexObjectList4[32];
 //! Array of (4) Collisions?
-Collision D_8018C0B0[4];
+Collision D_8018C0B0[8];
 /**
  * List of object list indices used for:
  *   Moles in Moo Moo Farm
@@ -360,7 +361,7 @@ s32 gObjectParticle4[gObjectParticle4_SIZE];
  * trees when you bonk into them
  */
 s32 gLeafParticle[gLeafParticle_SIZE];
-hud_player playerHUD[4];
+hud_player playerHUD[8];
 /**
  * List of object list indices used by the clouds and stars in some stages
  * Also used for snowflakes like gObjectParticle1? Not sure what's up with that
@@ -389,13 +390,13 @@ s16 gGPCurrentRaceCharacterIdByRank[8];
 s16 D_8018CF90;
 s16 D_8018CF98[8];
 s16 D_8018CFA8;
-u8 D_8018CFAC[4];
+u8 D_8018CFAC[8];
 s16 D_8018CFB0;
-u8 D_8018CFB4[4];
+u8 D_8018CFB4[8];
 s16 D_8018CFB8;
-u8 D_8018CFBC[4];
+u8 D_8018CFBC[8];
 s16 D_8018CFC0;
-u8 D_8018CFC4[4];
+u8 D_8018CFC4[8];
 s16 D_8018CFC8;
 f32 D_8018CFCC;
 s16 D_8018CFD0;
@@ -1283,7 +1284,9 @@ void func_80059AC8(void) {
             D_8018CF68[i] = func_8008A890(&camera1[i]);
             func_800892E0(i);
         }
-        switch (gScreenModeSelection) {
+        if(x360_net8_active()) {
+            for(i=0;i<x360_net_player_count();++i) func_80059A88(i);
+        } else switch (gScreenModeSelection) {
             case SCREEN_MODE_1P:
                 if (gGamestate != 9) {
                     func_80059A88(PLAYER_ONE);
@@ -1335,7 +1338,16 @@ void func_80059D00(void) {
     func_8005A380();
 
     if (D_801657AE == 0) {
-        switch (gScreenModeSelection) {
+        if(x360_net8_active()) {
+            int i;
+            for(i=0;i<x360_net_player_count();++i) {
+                randomize_seed_from_controller(i);
+                func_80059820(i);
+                func_8005D0FC(i);
+                if(!gDemoMode) func_8007AA44(i);
+            }
+            update_object();
+        } else switch (gScreenModeSelection) {
             case SCREEN_MODE_1P:
                 randomize_seed_from_controller(PLAYER_ONE);
                 if (D_8018D214 == false) {
@@ -2545,8 +2557,8 @@ void func_8005C980(void) {
         if (D_80165590 == 0) {
             D_8018CF98[var_v0] = temp_v1;
         }
-        D_8018CF28[temp_v1] = &gPlayerOne[sp0];
-        if (sp0 == 0) {
+        D_8018CF28[temp_v1] = &gPlayerOne[var_v0];
+        if (var_v0 == 0) {
             D_80165794 = temp_v1;
         }
     }
@@ -2712,6 +2724,10 @@ void func_8005CB60(s32 playerId, s32 lapCount) {
 }
 
 void func_8005D0FC(s32 playerId) {
+    if(x360_net8_active()) {
+        if(gModeSelection!=BATTLE) func_8005CB60(playerId,gLapCountByPlayerId[playerId]);
+        return;
+    }
     if (gModeSelection != BATTLE) {
         switch (playerId) { /* irregular */
             case PLAYER_ONE:
@@ -6403,7 +6419,7 @@ void func_8006CEC0(Player* arg0, s16 arg1, s8 playerId, s8 arg3) {
     if (--sp20 < 0) {
         sp20 = 9;
     }
-    // Spawn particles when oob    
+    // Spawn particles when oob
     if (arg0->particlePool0[arg1].isAlive == 1) {
         switch (arg0->particlePool0[arg1].type) {
             case 1:
@@ -6725,6 +6741,7 @@ void func_8006DD3C(Player* arg0, s8 arg1, s8 arg2) {
 }
 
 void func_8006E058(void) {
+    if(x360_net8_active()) {int i;for(i=0;i<x360_net_player_count();++i)func_8006E420(&gPlayers[i],(s8)i,0);return;}
     switch (gActiveScreenMode) {
         case SCREEN_MODE_1P:
             switch (gModeSelection) {

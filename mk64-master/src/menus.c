@@ -1360,7 +1360,7 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                     play_sound2(SOUND_MENU_GO_BACK);
                     break;
                 }
-                
+
                 if (btnAndStick & A_BUTTON) {
                     switch (gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]]) {
                         default:
@@ -1434,7 +1434,7 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                     reset_cycle_flash_menu();
                     play_sound2(SOUND_MENU_GO_BACK);
                     break;
-                } 
+                }
                 if (btnAndStick & A_BUTTON) {
                     reset_cycle_flash_menu();
                     if ((gPlayerCount == 1) && ((gGameModeMenuColumn - 1)[gPlayerCount] == 1) && (subMode == 1)) {
@@ -1539,7 +1539,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         play_sound2(SOUND_MENU_GO_BACK);
                     }
                 }
-            
+
                 if ((btnAndStick & A_BUTTON) && (gCharacterGridIsSelected[controllerIdx] == 0)) {
                     gCharacterGridIsSelected[controllerIdx] = true;
                     func_800C90F4(controllerIdx, ((sCharacterGridOrder - 1)[gCharacterGridSelections[controllerIdx]] * 0x10) + 0x2900800E);
@@ -1603,7 +1603,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         }
                     }
                     return;
-                    
+
                 }
                 if (btnAndStick & R_JPAD) {
                     if ((gCharacterGridSelections[controllerIdx] != 4U) && (gCharacterGridSelections[controllerIdx] != 8U)) {
@@ -1632,7 +1632,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                                 play_sound2(SOUND_MENU_CURSOR_MOVE);
                                 return;
                             }
-                            
+
                             j--;
                             if (j == 0 || j == 4) {
                                 break;

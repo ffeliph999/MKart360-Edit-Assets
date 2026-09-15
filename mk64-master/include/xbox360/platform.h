@@ -26,6 +26,13 @@ void x360_platform_shutdown(void);
 void x360_present_and_pace(void);
 double x360_time_seconds(void);
 
+/* X360_CRT_480I_NATIVE_BACKBUFFER:
+ * The game keeps a 1280x720 logical canvas; these report the physical
+ * framebuffer selected from XGetVideoMode(). */
+unsigned x360_video_width(void);
+unsigned x360_video_height(void);
+int x360_video_widescreen(void);
+
 void x360_read_controllers(void *pads, int count);
 
 /* Feed an N64 display list (spTask->task.t.data_ptr) to the port renderer. */

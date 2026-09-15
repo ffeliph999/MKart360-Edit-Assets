@@ -84,7 +84,7 @@ extern Camera* camera4;
 
 extern s8 D_80164A89;
 
-extern s32 D_80164A08[4];
+extern s32 D_80164A08[8];
 
 extern s32 D_80164A28;
 extern s32 D_80164A2C;

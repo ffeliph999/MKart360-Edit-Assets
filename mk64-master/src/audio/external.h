@@ -358,33 +358,33 @@ extern struct Sound sSoundRequests[0x100];
 // Data entries
 extern u8 D_800E9DA0;
 extern s32 D_800E9DB4[];
-extern f32 D_800E9DC4[4]; // = { 1.0f, 1.0f, 1.0f, 1.0f };
-extern f32 D_800E9DD4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800E9DE4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9DC4[8]; // = { 1.0f, 1.0f, 1.0f, 1.0f };
+extern f32 D_800E9DD4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9DE4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
 extern f32 D_800E9DF4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-extern s32 D_800E9E14[4]; // = { 0, 0, 0, 0 };
-extern s32 D_800E9E24[4]; // = { 0, 0, 0, 0 };
+extern s32 D_800E9E14[8]; // = { 0, 0, 0, 0 };
+extern s32 D_800E9E24[8]; // = { 0, 0, 0, 0 };
 extern s32 D_800E9E34[8];
-extern f32 D_800E9E54[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f }; /* const */
-extern f32 D_800E9E64[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern s32 D_800E9E74[4]; // = { 0, 0, 0, 0 };          /* const */
-extern s32 D_800E9E84[4];
-extern u32 D_800E9E94[4];
-extern s32 D_800E9EA4[4]; // = { 0, 0, 0, 0 };
-extern f32 D_800E9EB4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800E9EC4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800E9ED4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800E9EE4[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800E9EF4[4];
-extern f32 D_800E9F04[4]; // = { 1.0f, 1.0f, 1.0f, 1.0f };
-extern f32 D_800E9F14[4]; // = { 1.0f, 1.0f, 1.0f, 1.0f }; /* const */
+extern f32 D_800E9E54[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f }; /* const */
+extern f32 D_800E9E64[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern s32 D_800E9E74[8]; // = { 0, 0, 0, 0 };          /* const */
+extern s32 D_800E9E84[8];
+extern u32 D_800E9E94[8];
+extern s32 D_800E9EA4[8]; // = { 0, 0, 0, 0 };
+extern f32 D_800E9EB4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9EC4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9ED4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9EE4[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800E9EF4[8];
+extern f32 D_800E9F04[8]; // = { 1.0f, 1.0f, 1.0f, 1.0f };
+extern f32 D_800E9F14[8]; // = { 1.0f, 1.0f, 1.0f, 1.0f }; /* const */
 extern u8 D_800E9F24[8];  // = { 0, 0, 0, 0, 0, 0, 0, 0 };
 extern u8 D_800E9F2C[8];  // = { 0, 0, 0, 0, 0, 0, 0, 0 };
 extern f32 D_800E9F34[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }; /* const */
 extern f32 D_800E9F54[8]; // = { 1.0f, 1.0f, 1.0f, 1.0f }; /* const */
-extern u8 D_800E9F74[4];
-extern u8 D_800E9F78[4];
-extern struct Unk_800E9F7C D_800E9F7C[4];
+extern u8 D_800E9F74[8];
+extern u8 D_800E9F78[8];
+extern struct Unk_800E9F7C D_800E9F7C[8];
 extern u8 D_800E9F90[];
 extern struct Unk_800EA06C D_800EA06C[8];
 extern u8 D_800EA0EC[];
@@ -393,8 +393,8 @@ extern u8 D_800EA0F4;
 extern u8 D_800EA104;
 extern u8 D_800EA108; // = 0;
 extern u8 D_800EA10C[];
-extern f32 D_800EA110[4]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
-extern f32 D_800EA120[4];
+extern f32 D_800EA110[8]; // = { 0.0f, 0.0f, 0.0f, 0.0f };
+extern f32 D_800EA120[8];
 extern f32 D_800EA130[8];
 extern f32 D_800EA150; // = 1.4f;
 extern u8 D_800EA154[];

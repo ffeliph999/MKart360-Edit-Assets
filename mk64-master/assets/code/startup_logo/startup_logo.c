@@ -2966,4 +2966,3 @@ Gfx startup_texture_dl4[] = {
     gsSPDisplayList(startup_logo_dl18),
     gsSPEndDisplayList(),
 };
-

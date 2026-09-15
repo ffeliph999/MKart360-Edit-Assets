@@ -1173,4 +1173,10 @@
       <ObjectFileName>$(IntDir)xbox360_netplay.obj</ObjectFileName>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\mk64-master\src\xbox360\xbox360_race8.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)xbox360_race8.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
 </Project>

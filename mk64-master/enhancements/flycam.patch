@@ -45,7 +45,7 @@ index 02275b1..406739d 100644
 -            func_8001E45C(camera, player, index);
 +
 +            flycam(camera, player, index);
-+            
++
              break;
          case 8:
              func_8001E0C4(camera, player, index);
@@ -56,7 +56,7 @@ index 6b14e27..d10796b 100644
 @@ -65,6 +65,8 @@ void func_8001F9E4(Player *player, Camera *camera, s8 arg2) {
      }
  }
- 
+
 +extern u32 isFlycam;
 +
  u16 check_player_camera_collision(Player *player, Camera *camera, f32 arg2, f32 arg3) {
@@ -65,11 +65,11 @@ index 6b14e27..d10796b 100644
 @@ -79,6 +81,10 @@ u16 check_player_camera_collision(Player *player, Camera *camera, f32 arg2, f32
      s16 var_v0;
      u16 ret;
- 
+
 +    if (isFlycam) {
 +        return 1;
 +    }
-+    
++
      ret = 0;
      switch (gActiveScreenMode) {                              /* irregular */
      case SCREEN_MODE_1P:
@@ -105,7 +105,7 @@ index 0000000..5569838
 +typedef struct {
 +    Vec3f pos;
 +    Vec3f lookAt;
-+    Vec3s rot; 
++    Vec3s rot;
 +} FlycamSaveState;
 +
 +FlycamSaveState fState;
@@ -122,26 +122,26 @@ index 0000000..5569838
 +
 +/**
 + * Controls
-+ * 
++ *
 + * Forward: A
 + * Backward: B
-+ * 
++ *
 + * Go faster: Z
-+ * 
++ *
 + * Up:       C-up
 + * Down:     C-down
-+ * 
++ *
 + * Targets players based on rank position
-+ * 
++ *
 + * Target player: R-trig
 + * Target next player: C-right
 + * Target previous player: C-left
-+ * 
++ *
 + * Switch camera modes:   D-pad left
-+ * 
++ *
 + * Camera mode 1: Enter flycam at the player's position
 + * Camera mode 2: Enter flycam at previous flycam spot
-+ * 
++ *
 +*/
 +
 +void flycam(Camera *camera, Player *player, s8 index) {
@@ -151,7 +151,7 @@ index 0000000..5569838
 +    f32 dirY;
 +    f32 dirZ;
 +    f32 length;
-+    
++
 +    if (controller->buttonPressed & L_TRIG) {
 +        isFlycam = !isFlycam;
 +
@@ -196,7 +196,7 @@ index 0000000..5569838
 +    //player->type |= PLAYER_HUMAN;
 +
 +    if ((player->type & PLAYER_START_SEQUENCE)) { return; }
-+    
++
 +
 +    flycam_controller_manager(camera, controller, player);
 +
@@ -433,7 +433,7 @@ index c2a84aa..338e2bd 100644
 @@ -180,6 +180,11 @@ void render_course_segments(uintptr_t addr, struct UnkStruct_800DC5EC *arg1) {
      arg1->pathCounter = temp_v1;
      temp_v1 = ((temp_v1 - 1) * 4) + var_a3;
-     
+
 +    if (isFlycam) {
 +        render_course_credits();
 +       return;
@@ -441,4 +441,3 @@ index c2a84aa..338e2bd 100644
 +
      gSPDisplayList(gDisplayListHead++, gfx[temp_v1]);
  }
- 

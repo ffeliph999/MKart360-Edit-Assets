@@ -829,4 +829,3 @@ glabel texture_small_green_triangle
 glabel gTexture7E56E4
 .incbin "textures/standalone/texture_7E56E4.ia16.mio0"
 glabel gTexture7E56E4_end
-

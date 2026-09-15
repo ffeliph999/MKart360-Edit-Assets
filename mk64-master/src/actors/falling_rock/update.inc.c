@@ -127,4 +127,3 @@ void update_actor_falling_rocks(struct FallingRock* rock) {
         }
     }
 }
-

@@ -28,4 +28,3 @@ u16 gTLUTRainbowRoadNeonWario[] = {
 u16 gTLUTRainbowRoadNeonToad[] = {
 	#include "assets/code/rainbow_road_tluts/gTLUTRainbowRoadNeonToad.rgba16.inc.c"
 };
-

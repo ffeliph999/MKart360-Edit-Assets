@@ -2,7 +2,7 @@
   vram:
     addr: 0x800E8700
     offset: 0xE9300
-  header: 
+  header:
     code:
       - '#include <ultra64.h>'
       - '#include <assets/data_800E8700.h>'

@@ -161,7 +161,7 @@ s16 func_802B3FD0(Player* owner, struct ShellActor* shell) {
     s16 playerId = -1;
     f32 smallestDistance = 25000000.0f;
 
-    for (playerIndex = 0; playerIndex < 4; playerIndex++) {
+    for (playerIndex = 0; playerIndex < (x360_net8_active()?x360_net_player_count():4); playerIndex++) {
         player = &gPlayers[playerIndex];
         if ((player->type & PLAYER_EXISTS) == 0) {
             continue;

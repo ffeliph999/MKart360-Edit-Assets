@@ -22,7 +22,7 @@ def convert(file):
             lines_out.append(re.sub(r"( *\{\{ *-*\d+, *-*\d+, *-*\d+\}, *\{ *-*\d+, *-*\d+\}, *\{).*, *.*, *.*(, *.*\}\},\n)", fr"\1{out}\2", line))
         else:
             lines_out.append(line)
-    
+
     return lines_out
 
 if __name__ == "__main__":
