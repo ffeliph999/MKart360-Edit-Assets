@@ -1,4 +1,4 @@
-# MKart360 — Fork com Texturas HD
+# MKart360 — permite editar texturas inclusive adicionar texturas em HD
 
 Fork de [sirdankz/MKart360](https://github.com/sirdankz/MKart360) (porte de Mario
 Kart 64 para Xbox 360, baseado na decompilação [n64decomp/mk64](https://github.com/n64decomp/mk64)).
