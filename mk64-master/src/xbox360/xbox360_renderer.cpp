@@ -98,6 +98,30 @@ static void select_tex(int tile,uint32_t id) {
 static void upload_tex(const uint8_t*rgba,int w,int h) {
     IDirect3DDevice9*d=x360_d3d_device();uint32_t id=selected[upload_tile];
     if(!d||!rgba||w<=0||h<=0||w>4096||h>4096||!id||id>textures.size())return;
+
+    /* Reaproveita a textura existente quando as dimensoes batem, em vez de
+       criar uma nova e destruir a antiga a cada envio. Com texturas HD sendo
+       reimportadas com frequencia, essa rotatividade em D3DPOOL_DEFAULT
+       fragmentava a memoria de video ate CreateTexture comecar a falhar --
+       e no caminho de falha a textura ANTIGA permanece na tela, o que
+       aparecia como alternancia entre alta e baixa resolucao. */
+    IDirect3DTexture9*cur=textures[id-1];
+    if(cur){
+        D3DSURFACE_DESC desc;
+        if(SUCCEEDED(cur->GetLevelDesc(0,&desc))&&desc.Width==(UINT)w&&desc.Height==(UINT)h){
+            D3DLOCKED_RECT lr;
+            if(SUCCEEDED(cur->LockRect(0,&lr,0,0))){
+                for(int y=0;y<h;y++){
+                    DWORD *row=(DWORD*)((BYTE*)lr.pBits+y*lr.Pitch);
+                    for(int x=0;x<w;x++){const uint8_t*c=rgba+(y*w+x)*4;row[x]=((DWORD)c[3]<<24)|((DWORD)c[0]<<16)|((DWORD)c[1]<<8)|c[2];}
+                }
+                cur->UnlockRect(0);
+                for(int i=0;i<2;i++)if(selected[i]==id)d->SetTexture(i,cur);
+                return;
+            }
+        }
+    }
+
     IDirect3DTexture9*t=0;
     HRESULT hr=d->CreateTexture(w,h,1,0,D3DFMT_LIN_A8R8G8B8,D3DPOOL_DEFAULT,&t,0);
     D3DLOCKED_RECT lock;
