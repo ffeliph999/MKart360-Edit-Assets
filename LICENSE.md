@@ -23,7 +23,9 @@ and their documentation. Upstream files that were only modified by this fork
 ## MIT License
 
 Copyright (c) 2026 [Sirdankz]
+
 Copyright (c) 2026 Felipe Souza — HD texture tools and documentation of this fork
+
 Copyright (c) 2026 Eduardo (Edu dicas e gameplay) — collaborator contributions
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

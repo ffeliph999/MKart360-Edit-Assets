@@ -46,7 +46,9 @@ detentores.
 ## Licença MIT
 
 Copyright (c) 2026 Sirdankz — código original do port para Xbox 360
+
 Copyright (c) 2026 Felipe Souza — ferramentas e documentação deste fork
+
 Copyright (c) 2026 Eduardo (Edu dicas e gameplay) — contribuições como colaborador
 
 É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia
