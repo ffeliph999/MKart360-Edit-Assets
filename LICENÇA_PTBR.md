@@ -20,7 +20,7 @@ A Licença MIT se aplica **somente** a:
 - o código original específico do port para Xbox 360, de autoria de
   **Sirdankz**, nos termos do `LICENSE.md` original;
 - o código e a documentação originais adicionados por este fork, de autoria
-  de **[SEU NOME]**: as ferramentas de texturas HD (`EXTRACT_MK64_TEXTURES.py`,
+  de **Felipe Souza e Edu dicas e Gameplay**: as ferramentas de texturas HD (`EXTRACT_MK64_TEXTURES.py`,
   `EXTRACT_LAKITU.py`, `PACK_TEXTURES.py`, `HALVE_PNGS.py`, `SCAN_HALVES.py`,
   `CROSS_CHECK.py`) e seus documentos.
 
@@ -44,7 +44,8 @@ detentores.
 ## Licença MIT
 
 Copyright (c) 2026 Sirdankz — código original do port para Xbox 360
-Copyright (c) 2026 [SEU NOME] — ferramentas e documentação deste fork
+Copyright (c) 2026 Felipe Souza — ferramentas e documentação deste fork
+Copyright (c) 2026 Edu dicas e Gameplay — ferramentas e documentação deste fork
 
 É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia
 do software coberto por esta licença e dos arquivos de documentação associados
