@@ -12,9 +12,19 @@ It does **not** apply to:
 
 Nothing in this file changes or replaces any upstream copyright, attribution, or license notice.
 
+### Fork additions
+
+This license also covers the original files added by this fork: the HD
+texture tools (`EXTRACT_MK64_TEXTURES.py`, `EXTRACT_LAKITU.py`,
+`PACK_TEXTURES.py`, `HALVE_PNGS.py`, `SCAN_HALVES.py`, `CROSS_CHECK.py`)
+and their documentation. Upstream files that were only modified by this fork
+(such as `gfx_pc.c` and `xbox360_renderer.cpp`) keep their existing terms.
+
 ## MIT License
 
 Copyright (c) 2026 [Sirdankz]
+Copyright (c) 2026 Felipe Souza — HD texture tools and documentation of this fork
+Copyright (c) 2026 Eduardo (Edu dicas e gameplay) — collaborator contributions
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of the original Xbox 360-specific software covered by this license and
