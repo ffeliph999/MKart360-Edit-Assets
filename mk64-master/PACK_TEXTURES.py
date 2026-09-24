@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Empacota os PNGs HD editados em extracted_textures\ para o formato .tex
 que o patch de gfx_pc.c le em runtime (game:\tex\<hash>.tex).
 
