@@ -125,6 +125,8 @@ struct TextureHashmapNode {
     uint32_t palette_hash;
 
     uint32_t texture_id;
+    /* Hash da textura HD que esta na GPU neste no (0 = nenhuma). */
+    uint32_t x360_hd_loaded;
     uint8_t cms, cmt;
     bool linear_filter;
 };
@@ -497,6 +499,13 @@ static uint8_t x360_hd_buf[2048 * 2048 * 4];
    eram a causa principal dos engasgos -- inclusive nos menus, onde os
    sprites de kart ficam animando.
    Orcamento fixo; quando estoura, descarta a entrada usada ha mais tempo. */
+/* Estatisticas de desempenho do HD (desligadas). Com 1, grava a cada ~60
+   quadros em game:\hdtex-stats.log quantas leituras do tex.pak, acertos e
+   descartes do cache em RAM e envios a GPU ocorreram -- para diagnosticar
+   quedas de desempenho sem adivinhar a causa. */
+#define X360_HDTEX_STATS 0
+static uint32_t x360_st_pak, x360_st_ramhit, x360_st_evict, x360_st_up, x360_st_upkb, x360_st_frames;
+
 #define X360_HDRAM_SLOTS   1024
 #define X360_HDRAM_BUDGET  (40u << 20)   /* 40 MB: a memoria do 360 e
                                              unificada, entao este cache
@@ -509,49 +518,54 @@ struct X360HDRamEntry {
 static struct X360HDRamEntry x360_hdram[X360_HDRAM_SLOTS];
 static uint32_t x360_hdram_bytes, x360_hdram_clock;
 
+/* Busca direta em todas as posicoes. A versao anterior usava enderecamento
+   aberto e parava na primeira posicao vazia; como o descarte zerava posicoes,
+   entradas guardadas depois de um "buraco" ficavam inalcancaveis -- ocupavam
+   memoria e posicao para sempre, e o cache travava cheio. 1024 comparacoes so
+   quando uma textura HD e de fato usada: custo desprezivel. */
 static int x360_hdram_find(uint32_t hash) {
-    unsigned i = hash & (X360_HDRAM_SLOTS - 1);
-    for (unsigned p = 0; p < X360_HDRAM_SLOTS; ++p) {
+    for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
         if (x360_hdram[i].data && x360_hdram[i].hash == hash) return (int)i;
-        if (!x360_hdram[i].data) return -1;
-        i = (i + 1) & (X360_HDRAM_SLOTS - 1);
-    }
     return -1;
 }
 
-static void x360_hdram_evict_until(uint32_t need) {
-    while (x360_hdram_bytes + need > X360_HDRAM_BUDGET) {
-        int victim = -1;
-        uint32_t oldest = 0xFFFFFFFFu;
-        for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
-            if (x360_hdram[i].data && x360_hdram[i].last_used < oldest) {
-                oldest = x360_hdram[i].last_used; victim = (int)i;
-            }
-        if (victim < 0) break;
-        free(x360_hdram[victim].data);
-        x360_hdram_bytes -= x360_hdram[victim].bytes;
-        memset(&x360_hdram[victim], 0, sizeof(x360_hdram[victim]));
-    }
+/* Descarta a entrada usada ha mais tempo. Devolve a posicao liberada ou -1. */
+static int x360_hdram_evict_one(void) {
+    int victim = -1;
+    uint32_t oldest = 0xFFFFFFFFu;
+    for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
+        if (x360_hdram[i].data && x360_hdram[i].last_used < oldest) {
+            oldest = x360_hdram[i].last_used; victim = (int)i;
+        }
+    if (victim < 0) return -1;
+    free(x360_hdram[victim].data);
+    x360_hdram_bytes -= x360_hdram[victim].bytes;
+    memset(&x360_hdram[victim], 0, sizeof(x360_hdram[victim]));
+    ++x360_st_evict;
+    return victim;
 }
 
 static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src, uint32_t bytes) {
     if (bytes > X360_HDRAM_BUDGET) return;
-    x360_hdram_evict_until(bytes);
-    unsigned i = hash & (X360_HDRAM_SLOTS - 1);
-    for (unsigned p = 0; p < X360_HDRAM_SLOTS; ++p) {
-        if (!x360_hdram[i].data) break;
-        i = (i + 1) & (X360_HDRAM_SLOTS - 1);
-        if (p == X360_HDRAM_SLOTS - 1) return; /* tabela cheia */
-    }
+    /* libera por BYTES... */
+    while (x360_hdram_bytes + bytes > X360_HDRAM_BUDGET)
+        if (x360_hdram_evict_one() < 0) break;
+    /* ...e por POSICOES: antes a tabela enchia de texturas pequenas (karts)
+       sem nunca descartar, e nada novo era guardado. */
+    int slot = -1;
+    for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
+        if (!x360_hdram[i].data) { slot = (int)i; break; }
+    if (slot < 0) slot = x360_hdram_evict_one();
+    if (slot < 0) return;
     uint8_t *buf = (uint8_t *)malloc(bytes);
     if (!buf) return;
     memcpy(buf, src, bytes);
-    x360_hdram[i].hash = hash;
-    x360_hdram[i].w = w;
-    x360_hdram[i].h = h;
-    x360_hdram[i].bytes = bytes;
-    x360_hdram[i].data = buf;
-    x360_hdram[i].last_used = ++x360_hdram_clock;
+    x360_hdram[slot].hash = hash;
+    x360_hdram[slot].w = w;
+    x360_hdram[slot].h = h;
+    x360_hdram[slot].bytes = bytes;
+    x360_hdram[slot].data = buf;
+    x360_hdram[slot].last_used = ++x360_hdram_clock;
     x360_hdram_bytes += bytes;
 }
 
@@ -664,6 +678,8 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
     int slot = x360_hdram_find(hash);
     if (slot >= 0) {
         x360_hdram[slot].last_used = ++x360_hdram_clock;
+        ++x360_st_ramhit; ++x360_st_up;
+        x360_st_upkb += (x360_hdram[slot].w * x360_hdram[slot].h * 4) >> 10;
         gfx_rapi->upload_texture(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h);
         return true;
     }
@@ -672,6 +688,7 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
     {
         uint32_t pw = 0, ph = 0;
         if (x360_pak_read(hash, &pw, &ph)) {
+            ++x360_st_pak; ++x360_st_up; x360_st_upkb += (pw * ph * 4) >> 10;
             x360_hdram_store(hash, pw, ph, x360_hd_buf, pw * ph * 4);
             gfx_rapi->upload_texture(x360_hd_buf, pw, ph);
             x360_hdtex_remember(hash, X360_HDTEX_ST_HIT);
@@ -874,6 +891,7 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     (*node)->tlut_mode = rdp.other_mode_h & (3U << G_MDSFT_TEXTLUT);
     (*node)->content_hash = content;
     (*node)->palette_hash = palette_content;
+    (*node)->x360_hd_loaded = 0;  /* no novo: a GPU ainda nao tem textura HD dele */
     x360_trace_texture(tile, 0, content, false);
     *n = *node;
     return false;
@@ -1458,7 +1476,18 @@ static void import_texture(int tile) {
            hash aqui, nenhum bloco era reconhecido de novo, o cache enchia e
            era esvaziado sem parar no meio do quadro, causando blocos trocados
            e piscadas. */
+        /* Cargas em blocos (LOADTILE, ex: retratos do menu) nunca contam como
+           "ja carregadas" no cache do port, entao sao reimportadas a CADA
+           quadro. Com a textura original (~4 KB) isso passa despercebido; com
+           a HD (~67 KB por bloco) eram ~2100 envios por segundo a GPU (~140
+           MB/s), cada um criando uma textura nova -- o que travava a selecao
+           de personagens depois de uma corrida, com a memoria de video cheia.
+           Se a GPU ja tem exatamente esta textura HD neste no, nao reenvia. */
+        if (node->x360_hd_loaded != 0 && node->x360_hd_loaded == hd_hash) {
+            return;
+        }
         bool hd_found = x360_try_load_hd_texture(hd_hash);
+        node->x360_hd_loaded = hd_found ? hd_hash : 0;
 
         /* Trace de diagnostico (desligado). Para reativar, troque o 0 por 1
            abaixo: grava em game:\hdtex-trace.log o hash calculado em runtime
@@ -1467,20 +1496,23 @@ static void import_texture(int tile) {
            Mantido desligado porque escreve em disco durante o jogo. */
 #define X360_HDTEX_TRACE 0
 /* Alvo do trace: 0 = sprites CI8 de 2048 bytes (metades de kart)
-                  1 = faixas RGBA16 (imagens grandes de menu) */
+                  1 = faixas RGBA16 (imagens grandes de menu)
+                  2 = qualquer textura CI (ex: sprites do Lakitu) */
 #define X360_HDTEX_TRACE_MENU 1
 #if X360_HDTEX_TRACE
-#if X360_HDTEX_TRACE_MENU
+#if X360_HDTEX_TRACE_MENU == 1
         if (fmt == G_IM_FMT_RGBA && siz == G_IM_SIZ_16b) {
+#elif X360_HDTEX_TRACE_MENU == 2
+        if (fmt == G_IM_FMT_CI) {
 #else
         if (fmt == G_IM_FMT_CI && source_size == 2048) {
 #endif
-            static uint32_t kt_seen[1500];
+            static uint32_t kt_seen[4000];
             static unsigned kt_n;
             bool kt_dup = false;
             for (unsigned i = 0; i < kt_n; ++i)
                 if (kt_seen[i] == hd_hash) { kt_dup = true; break; }
-            if (!kt_dup && kt_n < 1500) {
+            if (!kt_dup && kt_n < 4000) {
                 kt_seen[kt_n++] = hd_hash;
                 char msg[220];
                 /* Primeiros 12 bytes da origem: permite identificar EXATAMENTE
@@ -4076,6 +4108,25 @@ void gfx_run(Gfx *commands) {
 }
 
 void gfx_end_frame(void) {
+#if X360_HDTEX_STATS
+    if (++x360_st_frames >= 60) {
+        char line[200];
+        int n = _snprintf(line, sizeof(line) - 1,
+            "pak=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u\r\n",
+            x360_st_pak, x360_st_ramhit, x360_st_evict, x360_st_up, x360_st_upkb,
+            (unsigned)(x360_hdram_bytes >> 20));
+        HANDLE f = CreateFileA("game:\\hdtex-stats.log", GENERIC_WRITE, FILE_SHARE_READ,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (f != INVALID_HANDLE_VALUE) {
+            DWORD w = 0;
+            SetFilePointer(f, 0, NULL, FILE_END);
+            if (n > 0) WriteFile(f, line, (DWORD)n, &w, NULL);
+            CloseHandle(f);
+        }
+        x360_st_pak = x360_st_ramhit = x360_st_evict = x360_st_up = x360_st_upkb = 0;
+        x360_st_frames = 0;
+    }
+#endif
     if (!dropped_frame) {
         gfx_rapi->finish_render();
         gfx_wapi->swap_buffers_end();
