@@ -1452,7 +1452,12 @@ static void import_texture(int tile) {
        node->width/height NAO sao tocados aqui. */
     {
         uint32_t hd_hash = x360_texture_hash(source, source_size);
-        node->content_hash = hd_hash;
+        /* NAO sobrescrever node->content_hash aqui: e o campo que
+           gfx_texture_cache_lookup usa para reconhecer a textura. Para cargas
+           em blocos (LOADTILE, ex: retratos do menu) ele deve ficar 0; com o
+           hash aqui, nenhum bloco era reconhecido de novo, o cache enchia e
+           era esvaziado sem parar no meio do quadro, causando blocos trocados
+           e piscadas. */
         bool hd_found = x360_try_load_hd_texture(hd_hash);
 
         /* Trace de diagnostico (desligado). Para reativar, troque o 0 por 1
@@ -1482,7 +1487,7 @@ static void import_texture(int tile) {
                    qual regiao da imagem o jogo esta hasheando, comparando com
                    o que o extrator ve no PC (ver KART_DEBUG.py). */
                 _snprintf(msg, sizeof(msg) - 1,
-                    "MK64: KART_TRACE fmt=%u siz=%u w=%u h=%u srcsz=%u hash=%08x found=%u m=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\n",
+                    "MK64: KART_TRACE fmt=%u siz=%u w=%u h=%u srcsz=%u hash=%08x found=%u m=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X pitch=%u lx=%u ly=%u tw=%u\n",
                     (unsigned)fmt, (unsigned)siz, node->width, node->height, (unsigned)source_size,
                     hd_hash, hd_found ? 1u : 0u,
                     /* amostra do MEIO do bloco: o inicio do sprite e
@@ -1492,7 +1497,13 @@ static void import_texture(int tile) {
                     source[source_size/2 + 4], source[source_size/2 + 5],
                     source[source_size/2 + 6], source[source_size/2 + 7],
                     source[source_size/2 + 8], source[source_size/2 + 9],
-                    source[source_size/2 + 10], source[source_size/2 + 11]);
+                    source[source_size/2 + 10], source[source_size/2 + 11],
+                    /* geometria real do carregamento: largura da imagem-fonte
+                       (pitch em bytes), canto do bloco e largura declarada */
+                    (unsigned)(*gfx_loaded_texture(tile)).source_pitch,
+                    (unsigned)(rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].uls >> 2),
+                    (unsigned)(rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].ult >> 2),
+                    (unsigned)rdp.texture_to_load.width);
                 msg[sizeof(msg) - 1] = 0;
                 HANDLE tf = CreateFileA("game:\\hdtex-trace.log", GENERIC_WRITE,
                                          FILE_SHARE_READ, NULL, OPEN_ALWAYS,

@@ -21,18 +21,13 @@ compiled game assets.
     FATX per-folder file limit);
   - RAM cache for HD textures (avoids re-reading from disk);
   - enlarged texture cache (from 512 to 1024 entries);
-  - diagnostic trace disabled by default (`X360_HDTEX_TRACE 0`).
+  - diagnostic trace disabled by default (`X360_HDTEX_TRACE 0`), with a
+    menu mode (`X360_HDTEX_TRACE_MENU`) that also logs each piece's position;
+  - the HD hook no longer overwrites the texture cache's content hash —
+    this fixed flickering on menu textures loaded in blocks.
   - `x360_try_draw_hd_menu_quad` already exists in the code but is
     **inactive** (not called yet) — reserved for a future replacement of
     the large menu textures.
-
-- **`mk64-master/src/xbox360/xbox360_renderer.cpp`**
-  Now reuses the Direct3D texture when its size doesn't change, avoiding
-  `CreateTexture`/`Release` on every frame submitted — reduces overhead
-  when textures are swapped frequently.
-
-- **`mk64-master/PUBLIC_SOURCE_GOLD_HASHES.json`**
-  Renderer verification hash updated to reflect the change above.
 
 - **`mk64-master/.gitignore`**
   Now ignores extracted textures, `tex.pak`, trace logs, and
@@ -41,8 +36,9 @@ compiled game assets.
 
 ### Known limitations
 
-- Large menu images (**TKMK00** format — title screen, character names)
-  are **not** replaced yet.
+- Character-select portraits **are** replaced (see *Menu textures* below).
+  Large **TKMK00** images (title screen, character names) are **not**
+  replaced yet.
 - Lakitu's TMEM windows (56×72) follow the same rule measured for karts,
   without their own dedicated measurement — may not be fully accurate.
 
@@ -61,6 +57,8 @@ folder.
 | `HALVE_PNGS.py` | Halves PNG resolution, to fit the console's memory |
 | `SCAN_HALVES.py` | Diagnostic tool: finds where the "bottom halves" of kart sprites live when their hash doesn't match |
 | `CROSS_CHECK.py` | Cross-references the game's trace log with the manifests to find textures that weren't found |
+| `SCAN_MENU.py` | Measures how the game splits large menu images into blocks, from a trace log |
+| `menu_tiles_geometry.json` | Measured block layout of the menu images (coordinates only, no ROM data) |
 
 One-time install requirement:
 
@@ -187,6 +185,26 @@ fixing the extractor.
 
 Leave the trace disabled during normal use: it writes to disk during
 gameplay and affects performance.
+
+### Menu textures
+
+Large menu images (e.g. the character-select portraits) exceed the 4 KB
+TMEM, so the game loads them in blocks (33×33 with a 1-texel overlap), each
+with its own hash. `menu_tiles_geometry.json` stores the measured block
+layout; `PACK_TEXTURES.py` computes each block's hash from **your own** ROM
+data and crops the HD art to match. Nothing to do: just edit the PNG under
+`extracted_textures\generated\course_player_selection\` and pack.
+
+To add a screen that isn't measured yet: set `X360_HDTEX_TRACE 1` in
+`gfx_pc.c`, rebuild with `/t:Rebuild`, stay a few seconds on the screen,
+copy `hdtex-trace.log` to `mk64-master\` and run:
+
+```powershell
+py .\SCAN_MENU.py --log .\hdtex-trace.log --only generated/course_player_selection
+```
+
+It adds the new images to `menu_tiles_geometry.json`. Set the trace back to
+`0` afterwards.
 
 ### Common issues
 

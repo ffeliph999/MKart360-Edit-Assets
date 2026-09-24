@@ -21,18 +21,14 @@ nem os assets compilados do jogo.
     limite de arquivos por pasta do FATX);
   - cache das texturas HD em RAM (evita reler do disco);
   - cache de texturas ampliado (de 512 para 1024 entradas);
-  - trace de diagnóstico desligado por padrão (`X360_HDTEX_TRACE 0`).
+  - trace de diagnóstico desligado por padrão (`X360_HDTEX_TRACE 0`), com
+    modo de menu (`X360_HDTEX_TRACE_MENU`) que registra também a posição de
+    cada pedaço;
+  - o gancho HD não sobrescreve mais o hash de conteúdo do cache de
+    texturas — isso corrigiu as piscadas nas texturas de menu carregadas em blocos.
   - `x360_try_draw_hd_menu_quad` já está presente no código, mas **inativa**
     (ainda não é chamada) — reservada para uma futura substituição das
     texturas grandes de menu.
-
-- **`mk64-master/src/xbox360/xbox360_renderer.cpp`**
-  Passa a reaproveitar a textura do Direct3D quando o tamanho não muda,
-  evitando `CreateTexture`/`Release` a cada frame enviado — reduz o
-  overhead ao trocar texturas com frequência.
-
-- **`mk64-master/PUBLIC_SOURCE_GOLD_HASHES.json`**
-  Hash de verificação do renderer atualizado para refletir a mudança acima.
 
 - **`mk64-master/.gitignore`**
   Passa a ignorar as texturas extraídas, o `tex.pak`, os logs de trace e
@@ -41,8 +37,9 @@ nem os assets compilados do jogo.
 
 ### O que ainda não foi resolvido (conhecido)
 
-- As imagens grandes de menu (formato **TKMK00**, tela inicial, nomes de
-  personagem) ainda **não** são substituídas.
+- Os retratos da seleção de personagens **já** são substituídos (veja
+  *Texturas de menu* abaixo). As imagens grandes em **TKMK00** (tela
+  inicial, nomes de personagem) ainda **não** são.
 - As janelas de TMEM dos sprites do Lakitu (56×72) seguem a mesma regra
   medida nos karts, sem medição própria — pode não estar 100% correta.
 
@@ -61,6 +58,8 @@ dessa pasta.
 | `HALVE_PNGS.py` | Reduz PNGs pela metade, para caber na memória do console |
 | `SCAN_HALVES.py` | Ferramenta de diagnóstico: descobre onde ficam as "metades de baixo" dos sprites de kart que não bateram no hash |
 | `CROSS_CHECK.py` | Cruza o log de trace do jogo com os manifests para achar texturas que não foram encontradas |
+| `SCAN_MENU.py` | Mede, a partir de um log de trace, como o jogo divide as imagens grandes de menu em blocos |
+| `menu_tiles_geometry.json` | Disposição medida dos blocos das imagens de menu (só coordenadas, nada da ROM) |
 
 Requisito único de instalação (uma vez):
 
@@ -186,6 +185,28 @@ bytes produz o hash que faltou, mostrando o deslocamento real da metade —
 
 Deixe o trace desligado no uso normal: ele grava em disco durante o jogo e
 afeta a performance.
+
+
+### Texturas de menu
+
+As imagens grandes de menu (como os retratos da seleção de personagens)
+passam do limite de 4 KB da TMEM, então o jogo as carrega em blocos (33×33,
+com 1 texel de sobreposição), cada um com hash próprio. O
+`menu_tiles_geometry.json` guarda a disposição medida dos blocos; o
+`PACK_TEXTURES.py` calcula o hash de cada bloco a partir dos dados da **sua**
+ROM e recorta a arte HD do mesmo jeito. Não há nada a fazer: é só editar o
+PNG em `extracted_textures\generated\course_player_selection\` e empacotar.
+
+Para incluir uma tela ainda não medida: em `gfx_pc.c`, troque
+`X360_HDTEX_TRACE 0` por `1`, compile com `/t:Rebuild`, fique alguns
+segundos na tela, copie o `hdtex-trace.log` para `mk64-master\` e rode:
+
+```powershell
+py .\SCAN_MENU.py --log .\hdtex-trace.log --only generated/course_player_selection
+```
+
+Ele acrescenta as imagens novas ao `menu_tiles_geometry.json`. Depois,
+volte o trace para `0`.
 
 ### Problemas comuns
 

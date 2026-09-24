@@ -74,6 +74,64 @@ def write_tex(outdir, hash_hex, img):
     return out_path
 
 
+_ARRAY_RE = re.compile(
+    r"unsigned\s+char\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*\]\s*=\s*\{(.*?)\};", re.S)
+_HEX_RE = re.compile(r"0x([0-9A-Fa-f]{1,2})")
+
+
+def _fnv1a32(data):
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def aplicar_geometria(geo_path, generated):
+    """Para cada imagem da geometria, le os bytes do simbolo no banco gerado
+    (descomprimindo MIO0), calcula o hash de cada pedaco do jeito que o port
+    calcula (trecho continuo a partir do canto x0,y0) e injeta como
+    tmem_halves na entrada do manifest."""
+    try:
+        doc = json.loads(geo_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    banco = Path(__file__).resolve().parent / "src" / "xbox360" / "generated_banks" / doc.get("bank", "")
+    if not banco.is_file():
+        print(f"  ! {banco} nao existe -- rode o prepare/build antes")
+        return 0
+    try:
+        from EXTRACT_MK64_TEXTURES import mio0_decode
+    except ImportError:
+        mio0_decode = None
+    arrays = {nome: corpo for nome, corpo in _ARRAY_RE.findall(
+        banco.read_text(encoding="utf-8", errors="ignore"))}
+    por_simbolo = {e.get("symbol"): k for k, e in generated.items()}
+    feitos = 0
+    for simbolo, info in doc.get("images", {}).items():
+        chave = por_simbolo.get(simbolo)
+        corpo = arrays.get(simbolo)
+        if chave is None or corpo is None:
+            continue
+        dados = bytes(int(h, 16) for h in _HEX_RE.findall(corpo))
+        if dados[:4] == b"MIO0" and mio0_decode:
+            dados = mio0_decode(dados)
+        W = int(info["width"])
+        tiles = []
+        for t in info["tiles"]:
+            pw = t["x1"] - t["x0"]
+            ph = t["y1"] - t["y0"]
+            off = (t["y0"] * W + t["x0"]) * 2
+            L = pw * ph * 2
+            if off + L > len(dados):
+                continue
+            tiles.append(dict(t, hash=f"{_fnv1a32(dados[off:off + L]):08x}"))
+        if tiles:
+            generated[chave] = dict(generated[chave])
+            generated[chave]["tmem_halves"] = tiles
+            feitos += 1
+    return feitos
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="indir", default="extracted_textures")
@@ -102,6 +160,15 @@ def main():
                  for e in load_manifest(indir / "generated_texture_manifest.json")}
     karts = {e["png"].replace("\\", "/").lower(): e
              for e in load_manifest(indir / "kart_sprite_manifest.json")}
+    # Geometria PORTATIL dos pedacos de menu (menu_tiles_geometry.json, versionado
+    # no repositorio). Tem so coordenadas; os hashes sao calculados aqui a
+    # partir dos bancos gerados da ROM de quem esta usando -- assim funciona
+    # com qualquer versao de ROM e sem precisar ligar o trace.
+    geo_path = Path(__file__).resolve().parent / "menu_tiles_geometry.json"
+    if geo_path.is_file():
+        n_geo = aplicar_geometria(geo_path, generated)
+        print(f"Geometria de menu: {n_geo} imagem(ns) (menu_tiles_geometry.json)")
+
     # Faixas MEDIDAS em runtime para as imagens grandes de menu (menu_tiles_measured.json, opcional).
     # O jogo fatia essas imagens em varias faixas, cada uma com hash proprio;
     # usamos os cortes medidos, reaproveitando o caminho de "tmem_halves".
@@ -152,6 +219,27 @@ def main():
         if entry and entry.get("tmem_halves"):
             halves = entry["tmem_halves"]
             orig_h = int(entry["height"])
+            orig_w = int(entry["width"])
+            # Blocos que passam da borda (ex: 33 linhas a partir de y=32 numa
+            # imagem de 64): estende a arte HD repetindo a ultima linha/coluna,
+            # para o recorte manter a proporcao exata do bloco original em vez
+            # de esticar (o que criaria emenda visivel).
+            max_y1 = max(int(t["y1"]) for t in halves)
+            max_x1 = max(int(t.get("x1", orig_w)) for t in halves)
+            need_h = max(hgt, round(max_y1 / orig_h * hgt))
+            need_w = max(w, round(max_x1 / orig_w * w))
+            if need_h > hgt or need_w > w:
+                ext = Image.new("RGBA", (need_w, need_h))
+                ext.paste(img, (0, 0))
+                if need_h > hgt:
+                    ultima = img.crop((0, hgt - 1, w, hgt))
+                    for yy in range(hgt, need_h):
+                        ext.paste(ultima, (0, yy))
+                if need_w > w:
+                    col = ext.crop((w - 1, 0, w, need_h))
+                    for xx in range(w, need_w):
+                        ext.paste(col, (xx, 0))
+                img = ext
             # Usa as LINHAS reais de cada janela (y0/y1 do manifest), nao uma
             # divisao ao meio: as duas janelas se sobrepoem em uma linha
             # (a segunda comeca em 1984 bytes, nao 2048).
@@ -160,9 +248,16 @@ def main():
                 y1e = round(int(t["y1"]) / orig_h * hgt)
                 if y1e <= y0e:
                     y1e = y0e + 1
-                if y1e > hgt:
-                    y1e = hgt
-                crop = img.crop((0, y0e, w, y1e))
+                if y1e > img.size[1]:
+                    y1e = img.size[1]
+                # Pedacos 2D (menus): x0/x1 opcionais; sem eles, largura inteira.
+                x0e = round(int(t.get("x0", 0)) / orig_w * w)
+                x1e = round(int(t.get("x1", orig_w)) / orig_w * w)
+                if x1e <= x0e:
+                    x1e = x0e + 1
+                if x1e > img.size[0]:
+                    x1e = img.size[0]
+                crop = img.crop((x0e, y0e, x1e, y1e))
                 cw, ch = crop.size
                 if cw > a.max or ch > a.max:
                     print(f"  ! {rel} metade {i}: {cw}x{ch} excede --max={a.max}, pulando")

@@ -10,9 +10,6 @@ HD em tempo de execucao, sem alterar a ROM nem os assets compilados.
   cache em RAM, cache de texturas ampliado (512 -> 1024), trace de
   diagnostico desligado (`X360_HDTEX_TRACE 0`).
   `x360_try_draw_hd_menu_quad` esta presente mas inativa (nao e chamada).
-- `mk64-master/src/xbox360/xbox360_renderer.cpp` — reaproveita a textura
-  D3D quando o tamanho nao muda (evita CreateTexture/Release a cada envio).
-- `mk64-master/PUBLIC_SOURCE_GOLD_HASHES.json` — hash do renderer atualizado.
 - `mk64-master/.gitignore` — ignora texturas extraidas, `tex.pak`, logs e
   `src/xbox360/generated_banks/` (derivados da ROM).
 
@@ -21,9 +18,12 @@ HD em tempo de execucao, sem alterar a ROM nem os assets compilados.
 - `PACK_TEXTURES.py` — PNG -> `tex.pak`
 - `HALVE_PNGS.py` — reduz PNGs pela metade
 - `SCAN_HALVES.py`, `CROSS_CHECK.py` — diagnostico com o trace
+- `SCAN_MENU.py` — mede os blocos das imagens grandes de menu
+- `menu_tiles_geometry.json` — geometria medida dos blocos (so coordenadas)
 - `TEXTURAS_HD_COMO_USAR.md` — guia de uso
 
 ## Conhecido
-- Imagens grandes de menu (TKMK00 / faixas de TMEM) ainda nao substituidas.
+- Retratos da selecao de personagens: substituidos. Imagens TKMK00 (tela
+  inicial, nomes) ainda nao.
 - Janelas de TMEM do Lakitu (56x72) seguem a regra medida nos karts, sem
   medicao propria.
