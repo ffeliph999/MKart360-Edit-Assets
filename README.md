@@ -2,7 +2,7 @@
 
 Fork of [sirdankz/MKart360](https://github.com/sirdankz/MKart360) (Xbox 360
 port of Mario Kart 64, based on the [n64decomp/mk64](https://github.com/n64decomp/mk64)
-decompilation). This fork works **only with the US ROM** and adds a
+decompilation). This fork works with **all ROM regions** thanks to my personal friend **[Eduardo](https://github.com/EduDicaseGameplay)** from the YouTube channel **[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)**, and adds a
 **runtime HD texture replacement system**, without modifying the ROM or the
 compiled game assets.
 
@@ -36,11 +36,7 @@ compiled game assets.
 
 ### Known limitations
 
-- Character-select portraits **are** replaced (see *Menu textures* below).
-  Large **TKMK00** images (title screen, character names) are **not**
-  replaced yet.
-- Lakitu's TMEM windows (56×72) follow the same rule measured for karts,
-  without their own dedicated measurement — may not be fully accurate.
+-High-resolution textures (higher than HQ) can overload the Xbox 360 hardware and cause crashes or performance issues; HD support exists but is limited to the console's hardware.
 
 ---
 
@@ -300,6 +296,10 @@ doesn't require rebuilding.
 - **[sirdankz/MKart360](https://github.com/sirdankz/MKart360)** — the
   Xbox 360 port (native build, console-to-console multiplayer, rendering
   fixes), of which this repository is a fork.
+- **[Edu dicas e gameplay](https://github.com/EduDicaseGameplay)** - The person
+  who managed to simply decipher the texture extraction system of "TKMK00" so that
+  it was possible to replace the frames and textures of the main menu, in addition
+  to having managed to improve the extraction system to a point that I could not achieve.
 
 Mario Kart 64 and related properties belong to Nintendo. This is an
 unofficial homebrew port, not affiliated with or endorsed by Nintendo.

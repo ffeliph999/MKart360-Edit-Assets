@@ -2,7 +2,7 @@
 
 Fork de [sirdankz/MKart360](https://github.com/sirdankz/MKart360) (porte de Mario
 Kart 64 para Xbox 360, baseado na decompilação [n64decomp/mk64](https://github.com/n64decomp/mk64)).
-Este fork trabalha **somente com a ROM US** e adiciona um sistema de
+Este fork trabalha **Todas as regiões de Roms** graças ao meu amigo [Eduardo](https://github.com/EduDicaseGameplay) do canal do youtube [Edu dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay), e adiciona um sistema de
 **substituição de texturas em HD em tempo de execução**, sem alterar a ROM
 nem os assets compilados do jogo.
 
@@ -35,13 +35,10 @@ nem os assets compilados do jogo.
   `src/xbox360/generated_banks/` (tudo derivado da ROM do usuário, não deve
   ir para o controle de versão).
 
-### O que ainda não foi resolvido (conhecido)
+### Limitações
 
-- Os retratos da seleção de personagens **já** são substituídos (veja
-  *Texturas de menu* abaixo). As imagens grandes em **TKMK00** (tela
-  inicial, nomes de personagem) ainda **não** são.
-- As janelas de TMEM dos sprites do Lakitu (56×72) seguem a mesma regra
-  medida nos karts, sem medição própria — pode não estar 100% correta.
+- Texturas em alta resolução (acima de HD) podem causar problemas de desempenho e travamentos devido a limitações de memoria RAM e GPU do XBOX360;
+- Algumas texturas do menu principal não puderam ser substituídas.
 
 ---
 
@@ -300,6 +297,10 @@ exige recompilar de novo.
 - **[sirdankz/MKart360](https://github.com/sirdankz/MKart360)** — porte
   para Xbox 360 (build nativo, multiplayer console-a-console, correções de
   renderização), do qual este repositório é um fork.
+- **[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)** — Fez
+uma revolução no projeto, otimizando o extrator de texturas para extrair muito mais
+do que o meu original e decifrou o mistério das texturas escondidas **TKMK00** que nos deu
+muita dor de cabeça, sem ele esse projeto jamais teria chegado onde chegou.
 
 Mario Kart 64 e as propriedades relacionadas pertencem à Nintendo. Este é
 um porte homebrew não oficial, sem afiliação com a Nintendo.
