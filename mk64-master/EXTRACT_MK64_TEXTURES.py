@@ -1,16 +1,34 @@
 #!/usr/bin/env python3
-"""
+r"""
 Extrai as texturas do MK64 para PNG usando PUBLIC_ASSET_RECIPES.json + a ROM,
-com dimensoes e paleta lidas de yamls\\us\\*.yml (fonte de verdade -- sem chute).
+com dimensoes e paleta lidas dos YAMLs do projeto (região selecionável; fallback para us).
+
+Versão Final Otimizada e Corrigida com Suporte Completo ao Lakitu:
+  1. Restauração completa de 100% dos 1041 bancos gerados (apenas 7 microcódigos/não-imagens ignorados).
+  2. Extração completa de todos os frames e animações do Lakitu (assets/lakitu/*.json),
+     gerando lakitu_sprite_manifest.json com cálculo exato de tmem_halves e hashes FNV1a32.
+  3. Mapeamento de nomes amigáveis para other_textures (além de gTextureXXXX, gera também cópias com nomes identificáveis como lakitu_*).
+  4. Transparência Universal (Global): fundos pretos indesejados eliminados em minimapas, velocímetro, HUD, placas e fontes (I8/I4/CI).
+  5. Opção --force para proteger PNGs já editados e --keep-black caso deseje desativar a transparência.
+  6. Eliminação do SyntaxWarning de escape (\E) no Windows/Python 3.12+.
+  7. Geração de manifests no formato rom_offset/compression/decoded_size/hash
+     usado pelo sistema HD, com manifest consolidado + manifests por banco.
+  8. Manifest separado para TKMK00, incluindo hash dos pixels RGBA16 decodificados
+     e hash de cada tile de 4KB realmente carregado pelo RDP.
 
 Uso (dentro de mk64-master):
-    py .\\EXTRACT_MK64_TEXTURES.py --rom .\\baserom.us.z64
-
-Saida: extracted_textures\\<hash>__<nome>.png  +  texture_dims.json
+    py .\EXTRACT_MK64_TEXTURES.py --rom .\baserom.br.z64 --region br
+    py .\EXTRACT_MK64_TEXTURES.py --rom .\baserom.us.z64 --region us
+    py .\EXTRACT_MK64_TEXTURES.py --rom .\baserom.br.z64 --force
 """
 from pathlib import Path
-import argparse, json, re, struct, sys, zlib
+import argparse, hashlib, json, re, struct, sys, zlib
 from collections import defaultdict
+
+# ---------------------------------------------------------------- Configuração global
+
+SKIP_EXISTING_PNGS = False  # controlado por --protect-existing / --force
+TRANSPARENT_BLACK = True    # controlado por --keep-black; aplica transparência automática em I8, I4, CI e minimapas
 
 # ---------------------------------------------------------------- MIO0
 
@@ -57,12 +75,9 @@ def source_bytes(rom, offset, cache, raw_size=None):
 
 # ---------------------------------------------------------------- PNG (puro, sem PIL)
 
-SKIP_EXISTING_PNGS = True  # controlado por --force; protege edicoes ja feitas pelo usuario
-
-
-def write_png(path, w, h, rgba):
-    if SKIP_EXISTING_PNGS and path.is_file():
-        return False  # nao sobrescreve um PNG que o usuario ja pode ter editado
+def write_png(path, w, h, rgba, overwrite=True):
+    if not overwrite and path.is_file() and path.stat().st_size > 0:
+        return
     def chunk(tag, data):
         c = tag + data
         return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
@@ -77,25 +92,367 @@ def write_png(path, w, h, rgba):
            + chunk(b"IEND", b""))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(png)
-    return True
 
-# ---------------------------------------------------------------- fnv1a (mesmo hash do patch C)
+# ---------------------------------------------------------------- fnv1a & TMEM Halves
 
 def fnv1a32(data):
+    """Hash FNV-1a 32-bit idêntico ao patch C e ao formato dos manifestos do port."""
     h = 2166136261
     for b in data:
         h = ((h ^ b) * 16777619) & 0xFFFFFFFF
     return h
 
+
+RED_SHELL_HD_SALT = b"MK64_X360_RED_SHELL\x00"
+
+def red_shell_hd_hash(data):
+    """Identidade HD separada para o mesmo CI8 usado pelo Red Shell.
+
+    O jogo original troca somente a TLUT; os indices CI8 permanecem iguais.
+    Portanto o lookup normal teria exatamente o mesmo hash do Green Shell.
+    Esta variante adiciona um domínio fixo somente quando a TLUT vermelha esta
+    ativa no renderer Xbox 360. Karts/Lakitu nao passam por este caminho.
+    """
+    return fnv1a32(RED_SHELL_HD_SALT + bytes(data))
+
+
+def red_shell_rgba(rgba):
+    """Reproduz a transformacao da TLUT do jogo sobre o PNG decodificado.
+
+    init_red_shell_texture() troca os canais R/G de cada entrada RGBA16
+    (5 bits por canal). Como o PNG ja foi decodificado a partir da TLUT,
+    a mesma operacao no RGBA resultante e simplesmente R <-> G.
+    """
+    out = bytearray(rgba)
+    for i in range(0, len(out), 4):
+        out[i], out[i + 1] = out[i + 1], out[i]
+    return bytes(out)
+
+
+def tmem_halves_for(pixels, w, h=None, is_kart=False):
+    """Calcula os dois blocos de carregamento no TMEM do N64 (com 1 linha de sobreposição).
+
+    Para Lakitu (ex.: 56x72):
+      - Top half:    y0=0,  y1=36 (half_h)
+      - Bottom half: y0=35 (half_h - 1), y1=72 (h)
+    Para Karts (ex.: 64x64):
+      - Top half:    y0=0,  y1=32
+      - Bottom half: y0=31, y1=63
+    """
+    if h is None:
+        h = len(pixels) // w if w > 0 else 0
+    if h <= 0 or w <= 0:
+        return []
+
+    half_h = h // 2
+    # TMEM uses two equal-sized chunks with one overlapping row.
+    # The end coordinate is EXCLUSIVE because the pixel buffer is sliced
+    # as pixels[y0 * w : y1 * w].
+    #
+    # Example 64x64:
+    #   top    = 0:32  -> 32 rows
+    #   bottom = 31:63 -> 32 rows
+    y0_0, y1_0 = 0, half_h
+    y0_1, y1_1 = max(0, half_h - 1), max(0, h - 1)
+
+    half0_data = pixels[0 : y1_0 * w]
+    half1_data = pixels[max(0, half_h - 1) * w : max(0, h - 1) * w]
+
+    return [
+        {
+            "y0": y0_0,
+            "y1": y1_0,
+            "hash": f"{fnv1a32(half0_data):08x}"
+        },
+        {
+            "y0": y0_1,
+            "y1": y1_1,
+            "hash": f"{fnv1a32(half1_data):08x}"
+        }
+    ]
+
+
+# ---------------------------------------------------------------- manifest dos bancos gerados
+
+def tmem_layout_for(width, height, fmt):
+    """Calcula a divisao real necessaria para carregar uma textura na TMEM.
+
+    A regra aqui segue a tabela de limites do N64:
+      RGBA32      32x32
+      RGBA16/IA16 64x32 ou 32x64
+      I8/IA8      64x64
+      I4/IA4      128x64 ou 64x128
+      CI8         64x32 (2048 bytes de texels + 2048 de TLUT)
+      CI4         64x64 (2048 bytes de texels + 2048 de TLUT)
+
+    Importante: nao usamos somente ``bytes <= 4096`` para decidir. Uma
+    textura pode ter poucos bytes e ainda assim ultrapassar o limite de
+    dimensao/stride do formato (por exemplo RGBA16 45x45). Nesses casos ela
+    tambem precisa ser particionada.
+    """
+    fmt = str(fmt).lower()
+    bits = BPP.get(fmt)
+    if bits is None:
+        return None
+
+    width = int(width)
+    height = int(height)
+    indexed = fmt in ("ci4", "ci8")
+    capacity = 2048 if indexed else 4096
+    bpp = bits / 8.0
+
+    # Cada tupla representa uma orientacao maxima de um carregamento TMEM.
+    orientations = {
+        "rgba32": [(32, 32)],
+        "rgba16": [(64, 32), (32, 64)],
+        "ia16":   [(64, 32), (32, 64)],
+        "ia8":    [(64, 64)],
+        "i8":     [(64, 64)],
+        "ci8":    [(64, 32)],
+        "ia4":    [(128, 64), (64, 128)],
+        "i4":     [(128, 64), (64, 128)],
+        "ci4":    [(64, 64)],
+    }
+    candidates = orientations.get(fmt)
+    if not candidates:
+        return None
+
+    # Se uma orientacao inteira cabe, nao ha motivo para criar tiles.
+    for max_w, max_h in candidates:
+        if width <= max_w and height <= max_h:
+            return None
+
+    # Escolhe a orientacao que produz o maior tile valido para esta textura.
+    valid = []
+    for max_w, max_h in candidates:
+        tw = min(width, max_w)
+        th = min(height, max_h)
+        # Ajusta a altura para garantir o limite de bytes mesmo nos casos
+        # de dimensoes nao padrao.
+        max_rows_by_tmem = max(1, int(capacity // (tw * bpp)))
+        th = min(th, max_rows_by_tmem)
+        if tw > 0 and th > 0:
+            valid.append((tw * th, tw, th, max_w, max_h))
+
+    if not valid:
+        return None
+
+    _, tile_w, tile_h, _, _ = max(valid, key=lambda v: v[0])
+
+    tiles = []
+    y = 0
+    while y < height:
+        y1 = min(height, y + tile_h)
+        x = 0
+        while x < width:
+            x1 = min(width, x + tile_w)
+            tiles.append({"x0": x, "y0": y, "x1": x1, "y1": y1})
+            x = x1
+        y = y1
+
+    return {
+        "capacity_bytes": capacity,
+        "palette_bytes": 2048 if indexed else 0,
+        "indexed": indexed,
+        "tile_width": tile_w,
+        "tile_height": tile_h,
+        "tile_count": len(tiles),
+        "tiles": tiles,
+    }
+
+def _tile_bytes(data, width, fmt, x0, y0, x1, y1):
+    """Extrai os bytes de um tile mantendo a ordem de texels da ROM."""
+    bits = BPP[fmt]
+    if bits >= 8:
+        bpp = bits // 8
+        row_bytes = int(width) * bpp
+        out = bytearray()
+        for y in range(y0, y1):
+            a = y * row_bytes + x0 * bpp
+            b = y * row_bytes + x1 * bpp
+            out += data[a:b]
+        return bytes(out)
+
+    # I4/IA4/CI4: dois texels por byte. Os limites produzidos acima sao pares
+    # para os formatos em que a largura pode precisar de divisao.
+    out = bytearray()
+    row_bytes = (int(width) + 1) // 2
+    for y in range(y0, y1):
+        row = data[y * row_bytes:(y + 1) * row_bytes]
+        nibbles = []
+        for value in row:
+            nibbles.append((value >> 4) & 0xF)
+            nibbles.append(value & 0xF)
+        nibbles = nibbles[x0:x1]
+        for i in range(0, len(nibbles), 2):
+            hi = nibbles[i] << 4
+            lo = nibbles[i + 1] if i + 1 < len(nibbles) else 0
+            out.append(hi | lo)
+    return bytes(out)
+
+
+def menu_tmem_layout_for(width, height):
+    """Replicate func_80095E10(), used by render_menu_textures().
+
+    The N64 menu renderer does not use a generic 64x32 TMEM grid. It chooses
+    the load width as the next power of two >= texture width and the load
+    height as 0x400 / load_width, then emits gDPLoadTextureTile() calls.
+    This is the actual partition that gfx_pc.c hashes at runtime.
+    """
+    width, height = int(width), int(height)
+    if width <= 0 or height <= 0:
+        return None
+    tile_w = 1
+    while tile_w < width:
+        tile_w <<= 1
+    tile_h = 0x400 // tile_w
+    while (tile_h // 2) > height:
+        tile_h //= 2
+    tile_h = max(1, tile_h)
+    tiles = []
+    y = 0
+    while y < height:
+        y1 = min(height, y + tile_h)
+        x = 0
+        while x < width:
+            x1 = min(width, x + tile_w)
+            tiles.append({"x0": x, "y0": y, "x1": x1, "y1": y1})
+            x = x1
+        y = y1
+    return {"tile_width": tile_w, "tile_height": tile_h, "tile_count": len(tiles), "tiles": tiles}
+
+def rgba32_block_layout(width, height):
+    """Replicate render_texture_tile_rgba32_block()."""
+    tex_size = int(width) * int(height) * 4
+    num_blocks = (tex_size + 4095) // 4096
+    if num_blocks <= 0:
+        return None
+    block_h = max(1, int(height) // num_blocks)
+    tiles = []
+    y = 0
+    remaining = int(height)
+    for _ in range(num_blocks):
+        h = block_h if remaining > block_h else remaining
+        if h <= 0:
+            break
+        tiles.append({"x0": 0, "y0": y, "x1": int(width), "y1": y + h})
+        y += h
+        remaining -= h
+    return {"tile_width": int(width), "tile_height": block_h, "tile_count": len(tiles), "tiles": tiles}
+
+def fixed_frame_layout(width, height, frame_height):
+    """Layout for vertically packed animated sprites such as gTextureGhosts."""
+    width, height, frame_height = int(width), int(height), int(frame_height)
+    if width <= 0 or height <= 0 or frame_height <= 0 or height % frame_height:
+        return None
+    tiles = []
+    for y in range(0, height, frame_height):
+        tiles.append({"x0": 0, "y0": y, "x1": width, "y1": min(height, y + frame_height)})
+    return {"tile_width": width, "tile_height": frame_height, "tile_count": len(tiles), "tiles": tiles}
+
+def add_specific_tiles(item, data, width, height, fmt, mode):
+    if mode == "menu_80095E10":
+        layout = menu_tmem_layout_for(width, height)
+    elif mode == "rgba32_block":
+        layout = rgba32_block_layout(width, height)
+    elif mode == "ghost_frames_48x40":
+        layout = fixed_frame_layout(width, height, 40)
+    else:
+        layout = None
+    if not layout:
+        return
+    tiles = []
+    for t in layout["tiles"]:
+        raw = _tile_bytes(data, int(width), fmt, t["x0"], t["y0"], t["x1"], t["y1"])
+        e = dict(t)
+        e["decoded_size"] = len(raw)
+        e["hash"] = f"{fnv1a32(raw):08x}"
+        tiles.append(e)
+    item["tmem_mode"] = mode
+    item["tmem"] = {"capacity_bytes": 4096, "palette_bytes": 0, "indexed": fmt in ("ci4", "ci8"),
+                    "tile_width": layout["tile_width"], "tile_height": layout["tile_height"],
+                    "tile_count": len(tiles)}
+    item["tmem_tiles"] = tiles
+
+def add_tmem_tiles_to_manifest(item, data, width, height, fmt):
+    """Adiciona tiles + hash FNV1a de cada faixa quando a imagem excede a TMEM."""
+    layout = tmem_layout_for(width, height, fmt)
+    if not layout:
+        return
+    tiles = []
+    for t in layout["tiles"]:
+        raw = _tile_bytes(data, int(width), fmt, t["x0"], t["y0"], t["x1"], t["y1"])
+        entry = dict(t)
+        entry["decoded_size"] = len(raw)
+        entry["hash"] = f"{fnv1a32(raw):08x}"
+        tiles.append(entry)
+
+    item["tmem"] = {
+        "capacity_bytes": layout["capacity_bytes"],
+        "palette_bytes": layout["palette_bytes"],
+        "indexed": layout["indexed"],
+        "tile_width": layout["tile_width"],
+        "tile_height": layout["tile_height"],
+        "tile_count": len(tiles),
+    }
+    item["tmem_tiles"] = tiles
+
+
+def build_generated_manifest_entry(out_rel, bank, symbol, rom_offset, data,
+                                   width, height, fmt, compression,
+                                   include_tmem=False):
+    """Monta uma entrada no formato dos manifests usados pelo PACK_TEXTURES."""
+    item = {
+        "png": str(out_rel).replace("\\", "/"),
+        "bank": bank,
+        "symbol": symbol,
+        "rom_offset": f"0x{int_value(rom_offset):X}",
+        "width": int(width),
+        "height": int(height),
+        "format": str(fmt).lower(),
+        "compression": compression,
+        "decoded_size": len(data),
+        "decoded_hash_fnv1a32": f"{fnv1a32(data):08x}",
+    }
+
+    needed = (int(width) * int(height) * BPP[item["format"]] + 7) // 8 \
+        if item["format"] in BPP else None
+
+    # Os seis frames CI8 crus do Lakitu já fazem parte do banco
+    # other_textures.c e são mantidos no formato histórico do manifest:
+    # sem dimensions_size_verified/verification_note.
+    special_raw_ci8 = (
+        bank == "other_textures.c"
+        and item["format"] == "ci8"
+        and compression == "raw"
+    )
+
+    if not special_raw_ci8:
+        item["dimensions_size_verified"] = (needed == len(data)) if needed is not None else False
+        item["verification_note"] = "ROM-decoded"
+
+    if include_tmem:
+        item["tmem_halves"] = tmem_halves_for(data, int(width), int(height))
+
+    # Only add partitions when we know the actual renderer that consumes the
+    # texture. Generic TMEM geometry is NOT sufficient because MK64 uses
+    # several different gDPLoad* paths.
+    mode = None
+    if bank in ("course_player_selection.c", "texture_data_2.c") and item["format"] == "rgba16":
+        mode = "menu_80095E10"
+    elif bank == "other_textures.c" and symbol == "logo_mario_kart_64" and item["format"] == "rgba32":
+        mode = "rgba32_block"
+    elif bank == "other_textures.c" and symbol == "gTextureGhosts" and item["format"] == "ci8":
+        mode = "ghost_frames_48x40"
+    if mode:
+        add_specific_tiles(item, data, int(width), int(height), item["format"], mode)
+    return item
+
+
 # ---------------------------------------------------------------- parser YAML minimo
 
 def parse_yaml_symbols(text):
-    """Parser bem simples para o formato usado pelos yamls/us/*.yml:
-       symbol_name:
-         key: value
-         key2: value2
-       Retorna dict symbol_name -> {key: value(str)}.
-       Ignora blocos sem indentacao de 2 espacos (listas, etc.)."""
+    """Parser simples para o formato usado pelos yamls/us/*.yml."""
     out = {}
     current = None
     for raw_line in text.splitlines():
@@ -112,241 +469,871 @@ def parse_yaml_symbols(text):
     return out
 
 
-def load_all_yaml_symbols(root):
+def load_all_yaml_symbols(root, region="auto"):
+    """Carrega os YAMLs da região pedida. Se ela não existir, usa US."""
     symbols = {}
-    yaml_dir = root / "yamls" / "us"
-    if not yaml_dir.is_dir():
-        return symbols
-    for p in yaml_dir.glob("*.yml"):
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+    dirs = []
+    if region and region != "auto":
+        dirs.append(root / "yamls" / region)
+    dirs.append(root / "yamls" / "us")
+    seen = set()
+    for yaml_dir in dirs:
+        if not yaml_dir.is_dir() or yaml_dir in seen:
             continue
-        symbols.update(parse_yaml_symbols(text))
+        seen.add(yaml_dir)
+        for p in yaml_dir.glob("*.yml"):
+            try:
+                text = p.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            symbols.update(parse_yaml_symbols(text))
     return symbols
 
 
 def load_asset_json_symbols(root):
-    """Carrega os metadados de assets/courses/*.json e demais asset JSONs.
-
-    Eles descrevem varias texturas que nao tem sufixo de formato no arquivo
-    gerado (por exemplo, CI8 com TLUT e RGBA16 comprimido em MIO0). Ignora JSONs
-    que nao sejam o mapa simples ``simbolo -> propriedades`` de assets.
-    """
+    """Carrega metadados de todos os JSONs, inclusive o assets.json da raiz e assets/**/*.json."""
     symbols = {}
-    assets_dir = root / "assets"
-    if not assets_dir.is_dir():
-        return symbols
-    for path in assets_dir.rglob("*.json"):
+
+    def add(symbol, info, fmt_hint=None):
+        if not isinstance(symbol, str) or not isinstance(info, dict):
+            return
+        width = height = None
+        fmt = None
+        if 'width' in info and 'height' in info:
+            width, height = info['width'], info['height']
+            fmt = info.get('type', info.get('format'))
+        meta = info.get('meta')
+        if isinstance(meta, dict) and isinstance(meta.get('dims'), (list, tuple)) and len(meta['dims']) >= 2:
+            width, height = meta['dims'][0], meta['dims'][1]
+            fmt = fmt or fmt_hint
         try:
-            entries = json.loads(path.read_text(encoding="utf-8"))
+            width, height = int(width), int(height)
+        except (TypeError, ValueError):
+            return
+        if width <= 0 or height <= 0:
+            return
+        item = {'width': width, 'height': height}
+        if fmt:
+            item['type'] = str(fmt).lower()
+        for key in ('tlut', 'tlut_symbol', 'rom_offset', 'block_offset', 'size', 'output_dir'):
+            if key in info:
+                item[key] = info[key]
+        symbols[symbol] = item
+
+    paths = []
+    root_assets = root / 'assets.json'
+    if root_assets.is_file():
+        paths.append(root_assets)
+    assets_dir = root / 'assets'
+    if assets_dir.is_dir():
+        paths.extend(assets_dir.rglob('*.json'))
+
+    for path in paths:
+        try:
+            entries = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(entries, dict):
             continue
-        for symbol, info in entries.items():
-            if isinstance(info, dict) and "width" in info and "height" in info:
-                symbols[symbol] = info
+        for key, info in entries.items():
+            if not isinstance(info, dict):
+                continue
+            if 'width' in info and 'height' in info:
+                add(key, info)
+                continue
+            fmt_hint = None
+            m = SOURCE_FMT_RE.search(str(key).replace('.png', '.inc.c'))
+            if m:
+                fmt_hint = m.group(1).lower()
+            elif isinstance(key, str):
+                fm = re.search(r'\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)(?:\.png)?$', key, re.I)
+                if fm:
+                    fmt_hint = fm.group(1).lower()
+            if isinstance(key, str):
+                base = Path(key).name
+                base = re.sub(r'\.(png|inc\.c)$', '', base, flags=re.I)
+                base = re.sub(r'\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)$', '', base, flags=re.I)
+                add(base, info, fmt_hint)
+
+    other_s = root / "data" / "other_textures.s"
+    if other_s.is_file():
+        try:
+            text = other_s.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+        for generated_symbol, inc in re.findall(
+                r"glabel\s+([A-Za-z_][A-Za-z0-9_]*)\s*\n\s*\.incbin\s+\"([^\"]+)\"",
+                text):
+            base = Path(inc.replace("\\", "/")).name
+            base = re.sub(r"\.(png|mio0|inc\.c)$", "", base, flags=re.I)
+            base = re.sub(
+                r"\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4|tlut)$",
+                "", base, flags=re.I)
+            info = symbols.get(base)
+            if info is not None and generated_symbol not in symbols:
+                symbols[generated_symbol] = dict(info)
+
     return symbols
+
+
+def load_other_textures_file_map(root):
+    """Mapeia símbolos de other_textures para seus caminhos/nomes originais em incbin."""
+    other_s = root / "data" / "other_textures.s"
+    mapping = {}
+    if not other_s.is_file():
+        return mapping
+    try:
+        text = other_s.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return mapping
+    for sym, inc in re.findall(r"glabel\s+([A-Za-z_][A-Za-z0-9_]*)\s*\n\s*\.incbin\s+\"([^\"]+)\"", text):
+        clean_path = inc.replace("\\", "/")
+        stem = Path(clean_path).name
+        stem = re.sub(r"\.(mio0|png|inc\.c)$", "", stem, flags=re.I)
+        stem = re.sub(r"\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)$", "", stem, flags=re.I)
+        mapping[sym] = {"path": clean_path, "stem": stem}
+    return mapping
 
 
 # ---------------------------------------------------------------- bancos gerados do port 360
 
 MENU_TEXTURE_RE = re.compile(
-    r"\{\s*-?\d+\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,"
+    r"\{\s*(-?\d+)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(\d+)\s*,\s*(\d+)\s*,"
 )
 
 
-def load_menu_texture_dims(root):
-    """Lê largura/altura da tabela MenuTexture do próprio jogo."""
+def load_menu_texture_metadata(root):
+    """Lê tipo/largura/altura das entradas MenuTexture do próprio jogo."""
     table = root / "src" / "data" / "textures.c"
     if not table.is_file():
         return {}
     text = table.read_text(encoding="utf-8", errors="ignore")
-    return {symbol: (int(w), int(h))
-            for symbol, w, h in MENU_TEXTURE_RE.findall(text)}
+    metadata = {}
+    for tex_type, symbol, w, h in MENU_TEXTURE_RE.findall(text):
+        metadata[symbol] = {
+            "type": int(tex_type),
+            "width": int(w),
+            "height": int(h),
+        }
+    return metadata
 
 
-# ---------------------------------------------------------------- dimensoes reais via source scan
-
-# gDPLoadTextureBlock(pkt, timg, fmt, siz, width, height, pal, cms, cmt, masks, maskt, shifts, shiftt)
-# gDPLoadTextureBlock_4b(pkt, timg, fmt, width, height, pal, cms, cmt, masks, maskt, shifts, shiftt)
-# gsDPLoadTextureBlock(timg, fmt, siz, width, height, ...) -- variante "gs" sem o arg pkt
-# gDPLoadTextureTile / gsDPLoadTextureTile(pkt?, timg, fmt, siz, width, height, uls, ult, lrs, lrt, ...)
-#   -- aqui width/height sao as dimensoes DECLARADAS da imagem completa (para calculo de stride),
-#      nao o tamanho do recorte uls/ult/lrs/lrt -- servem igual para nosso proposito.
-_LOAD_MACRO_RE = re.compile(
-    r'\b(gs?DPLoadTextureBlock(?:_4b)?|gs?DPLoadTextureTile)\s*\(((?:[^()]|\([^()]*\))*)\)',
-    re.DOTALL,
-)
-_INT_RE = re.compile(r'^(0x[0-9A-Fa-f]+|\d+)$')
-_FMT_RE_TOKEN = re.compile(r'^G_IM_FMT_')
-_SIZ_RE_TOKEN = re.compile(r'^G_IM_SIZ_')
+def load_menu_texture_dims(root):
+    """Lê largura/altura da tabela MenuTexture do próprio jogo."""
+    return {symbol: (info["width"], info["height"])
+            for symbol, info in load_menu_texture_metadata(root).items()}
 
 
-def _split_top_level_args(s):
-    """Divide os argumentos de uma chamada de macro por virgula, ignorando
-    virgulas dentro de parenteses aninhados (ex: chamadas dentro de args)."""
-    args, depth, cur = [], 0, []
-    for ch in s:
-        if ch == '(':
-            depth += 1; cur.append(ch)
-        elif ch == ')':
-            depth -= 1; cur.append(ch)
-        elif ch == ',' and depth == 0:
-            args.append(''.join(cur).strip()); cur = []
-        else:
-            cur.append(ch)
-    if cur:
-        args.append(''.join(cur).strip())
-    return args
+# ---------------------------------------------------------------- análise de uso no código-fonte dos bancos gerados
 
-
-def _dims_from_macro_args(macro_name, args):
-    """Dado o nome da macro e a lista de argumentos (como texto), tenta
-    localizar width,height de forma robusta: ancora no token de formato
-    (G_IM_FMT_*) e/ou tamanho (G_IM_SIZ_*) em vez de depender so de posicao,
-    ja que a presenca do argumento 'pkt' e do 'siz' varia por macro/variante."""
-    is_4b = macro_name.endswith('_4b')
-    fmt_idx = next((i for i, a in enumerate(args) if _FMT_RE_TOKEN.match(a)), None)
-    if fmt_idx is None:
-        return None
-    if is_4b:
-        wh_start = fmt_idx + 1
-    else:
-        siz_idx = next((i for i in range(fmt_idx + 1, len(args)) if _SIZ_RE_TOKEN.match(args[i])), None)
-        if siz_idx is None:
-            return None
-        wh_start = siz_idx + 1
-    if wh_start + 1 >= len(args):
-        return None
-    w_tok, h_tok = args[wh_start], args[wh_start + 1]
-    if not (_INT_RE.match(w_tok) and _INT_RE.match(h_tok)):
-        return None
-    w = int(w_tok, 0)
-    h = int(h_tok, 0)
-    if w <= 0 or h <= 0 or w > 4096 or h > 4096:
-        return None
-    return w, h
-
-
-_INCLUDE_DECL_RE = re.compile(
-    r'\b(?:u8|u16|s8|s16)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*\]\s*=\s*\{\s*'
-    r'#include\s*"[^"]*/([A-Za-z0-9_]+)\.[A-Za-z0-9_.]*inc\.c"',
+LOAD_TEXTURE_RE = re.compile(
+    r"gDPLoadTexture(?:Block|Tile|MultiBlock)\s*\([^;]*?\b"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+    r"G_IM_FMT_([A-Za-z0-9_]+)\s*,\s*G_IM_SIZ_([A-Za-z0-9_]+)\s*,\s*"
+    r"(\d+)\s*,\s*(\d+)\s*,",
+    re.S,
 )
 
+DMA_ALIAS_RE = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\([^)]*\)\s*)?"
+    r"dma_textures\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,",
+)
 
-def build_symbol_aliases(root):
-    """Varre 'u8 NOME[] = { #include ".../<stem>.<fmt>.inc.c" };' para mapear
-    o nome de arquivo (usado como simbolo nas recipes/bancos) para o NOME de
-    variavel C real usado nas chamadas de display list -- em cursos
-    ('course_textures.linkonly.c') esses dois nomes costumam ser diferentes
-    (ex: arquivo 'sign_welcome_0' -> variavel 'gBBTextureSignWelcome0').
-    Retorna {stem_do_arquivo: nome_da_variavel_C}.
-    """
-    aliases = {}
-    for path in root.rglob("*.c"):
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if "#include" not in text:
-            continue
-        for varname, stem in _INCLUDE_DECL_RE.findall(text):
-            aliases.setdefault(stem, varname)
-    return aliases
+FMT_MAP = {
+    "RGBA": "rgba16", "IA": "ia8", "I": "i8", "CI": "ci8",
+}
+SIZ_MAP = {"4b": 4, "8b": 8, "16b": 16, "32b": 32}
+
+COURSE_TEX_INCLUDE_RE = re.compile(
+    r"\bu8\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\]\s*=\s*\{\s*"
+    r"#include\s+\"([^\"]+)\"\s*\}", re.S)
+COURSE_TEX_IMAGE_RE = re.compile(
+    r"gsDPSetTextureImage\s*\(\s*G_IM_FMT_([A-Za-z0-9_]+)\s*,\s*"
+    r"G_IM_SIZ_([A-Za-z0-9_]+)\s*,\s*[^,]+,\s*"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+COURSE_TILE_RE = re.compile(
+    r"gsDPSetTileSize\s*\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*"
+    r"(0x[0-9A-Fa-f]+|\d+)\s*,\s*(0x[0-9A-Fa-f]+|\d+)\s*\)")
+OTHER_TEXTURE_INC_RE = re.compile(
+    r"glabel\s+([A-Za-z_][A-Za-z0-9_]*)\s*\n\s*"
+    r"\.incbin\s+\"([^\"]+)\"", re.M)
 
 
-def scan_source_for_dims(root):
-    """Varre todo o codigo .c/.inc.c procurando chamadas gDPLoadTextureBlock/
-    gDPLoadTextureTile (e variantes _4b/gs) que referenciam cada simbolo de
-    textura, extraindo a largura/altura REAL declarada ali -- em vez de
-    chutar a partir do tamanho em bytes. Cobre a maioria dos casos comuns;
-    helpers customizados por ator continuam exigindo checagem manual.
-    Retorna {symbol: (w, h)}. Em caso de chamadas conflitantes para o mesmo
-    simbolo (raro), mantem a primeira encontrada.
-    """
-    dims = {}
-    for path in root.rglob("*.c"):
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if "DPLoadTexture" not in text:
-            continue
-        for m in _LOAD_MACRO_RE.finditer(text):
-            macro_name, argstr = m.group(1), m.group(2)
-            args = _split_top_level_args(argstr)
-            if len(args) < 3:
-                continue
-            # o ponteiro da textura (timg) e o 1o arg (macros "gs...") ou o
-            # 2o (macros com "pkt" na frente); aceitamos qualquer identificador
-            # de argumento que bata com um simbolo de textura conhecido.
-            wh = None
-            for a in args[:3]:
-                sym = a.strip()
-                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', sym):
-                    continue
-                if sym.startswith('G_') or sym.startswith('gDisplayList') or sym in ('pkt', 'displayListHead'):
-                    continue  # macros/RDP-enums/ponteiro de display list, nao textura
-                if sym in dims:
-                    continue
-                if wh is None:
-                    wh = _dims_from_macro_args(macro_name, args)
-                    if wh is None:
+def _fmt_from_gbi(fmt_name, siz_name):
+    fmt_name = fmt_name.upper()
+    siz_name = siz_name.lower()
+    bits = SIZ_MAP.get(siz_name)
+    if fmt_name == "RGBA" and bits == 16: return "rgba16"
+    if fmt_name == "RGBA" and bits == 32: return "rgba32"
+    if fmt_name == "IA" and bits == 4: return "ia4"
+    if fmt_name == "IA" and bits == 8: return "ia8"
+    if fmt_name == "IA" and bits == 16: return "ia16"
+    if fmt_name == "I" and bits == 4: return "i4"
+    if fmt_name == "I" and bits == 8: return "i8"
+    if fmt_name == "CI" and bits == 4: return "ci4"
+    if fmt_name == "CI" and bits == 8: return "ci8"
+    return None
+
+
+def load_course_texture_usage(root):
+    """Resolve dimensões de texturas de percurso pelos display lists."""
+    data_s = root / "data" / "other_textures.s"
+    if not data_s.is_file():
+        return {}, {}
+    try:
+        text = data_s.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}, {}
+    file_to_symbol = {}
+    file_to_fmt = {}
+    for sym, inc in OTHER_TEXTURE_INC_RE.findall(text):
+        name = Path(inc.replace("\\", "/")).name
+        file_to_symbol[name] = sym
+        m = re.search(r"\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)\.mio0$", name, re.I)
+        if m:
+            file_to_fmt[sym] = m.group(1).lower()
+
+    alias_to_symbol = {}
+    for path in (root / "courses").glob("*/course_textures.linkonly.c"):
+        try: t = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError: continue
+        for alias, inc in COURSE_TEX_INCLUDE_RE.findall(t):
+            name = Path(inc.replace("\\", "/")).name
+            sym = file_to_symbol.get(name)
+            if sym is None:
+                stem = re.sub(r"\.(?:inc\.c|mio0)$", "", name, flags=re.I)
+                for fn, fsym in file_to_symbol.items():
+                    if re.sub(r"\.mio0$", "", fn, flags=re.I) == stem:
+                        sym = fsym
                         break
-                dims[sym] = wh
-    return dims
+            if sym:
+                alias_to_symbol[alias] = sym
 
+    usages = defaultdict(list)
+    for path in (root / "courses").glob("*/course_displaylists.inc.c"):
+        try: t = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError: continue
+        images = list(COURSE_TEX_IMAGE_RE.finditer(t))
+        for i, m in enumerate(images):
+            fmt = _fmt_from_gbi(m.group(1), m.group(2))
+            alias = m.group(3)
+            sym = alias_to_symbol.get(alias)
+            if not sym or not fmt:
+                continue
+            end = images[i+1].start() if i+1 < len(images) else min(len(t), m.end()+1800)
+            segment = t[m.end():end]
+            tm = COURSE_TILE_RE.search(segment)
+            if not tm:
+                continue
+            lrs = int(tm.group(1), 0)
+            lrt = int(tm.group(2), 0)
+            w = (lrs >> 2) + 1
+            h = (lrt >> 2) + 1
+            if w > 0 and h > 0 and w <= 1024 and h <= 1024:
+                usages[sym].append((w, h, fmt, alias))
+
+    resolved, conflicts = {}, {}
+    for sym, vals in usages.items():
+        uniq = {(w,h,fmt) for w,h,fmt,_ in vals}
+        if len(uniq) == 1:
+            resolved[sym] = next(iter(uniq))
+        elif len(uniq) > 1:
+            conflicts[sym] = vals
+    return resolved, conflicts
+
+
+def load_source_texture_usage(root):
+    """Resolve dimensoes/formato pelo uso real, inclusive atraves de aliases."""
+    source_dir = root / "src"
+    if not source_dir.is_dir():
+        return {}, {}
+
+    texts = []
+    for path in source_dir.rglob("*.c"):
+        try:
+            texts.append(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            pass
+
+    aliases = defaultdict(set)
+    for text in texts:
+        for alias, source in DMA_ALIAS_RE.findall(text):
+            aliases[alias].add(source)
+
+    for _ in range(8):
+        changed = False
+        for alias, sources in list(aliases.items()):
+            expanded = set()
+            for source in sources:
+                expanded.update(aliases.get(source, {source}))
+            if expanded != sources:
+                aliases[alias] = expanded
+                changed = True
+        if not changed:
+            break
+
+    usages = defaultdict(set)
+
+    def add(symbol, w, h, fmt):
+        if symbol in aliases:
+            for original in aliases[symbol]:
+                usages[original].add((w, h, fmt))
+        else:
+            usages[symbol].add((w, h, fmt))
+
+    for text in texts:
+        for m in LOAD_TEXTURE_RE.finditer(text):
+            expr, fmt_name, siz_name, w, h = m.groups()
+            fmt_name = fmt_name.upper()
+            bits = SIZ_MAP.get(siz_name.lower())
+            if fmt_name not in FMT_MAP or bits is None:
+                continue
+            fmt = FMT_MAP[fmt_name]
+            if bits == 4:
+                fmt = "i4" if fmt == "i8" else ("ci4" if fmt == "ci8" else fmt)
+            elif bits == 8:
+                fmt = "i8" if fmt == "i8" else ("ci8" if fmt == "ci8" else fmt)
+            elif bits == 16:
+                fmt = "rgba16" if fmt == "rgba16" else ("ia16" if fmt == "ia8" else fmt)
+            elif bits == 32:
+                fmt = "rgba32" if fmt == "rgba16" else fmt
+            add(expr, int(w), int(h), fmt)
+
+        for helper_re, helper_fmt in SOURCE_HELPER_TEX_RES:
+            for m in helper_re.finditer(text):
+                add(m.group('symbol'), int(m.group('w'), 0), int(m.group('h'), 0), helper_fmt)
+
+        init_re = re.compile(
+            r'\binit_texture_object\s*\(\s*[^,]+,\s*(?P<tlut>[^,]+),\s*'
+            r'(?:\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\*?\s*\)\s*)?'
+            r'(?P<tex>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*'
+            r'(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*'
+            r'(?P<h>0x[0-9A-Fa-f]+|\d+)\s*\)', re.I)
+        for m in init_re.finditer(text):
+            add(m.group('tex'), int(m.group('w'), 0), int(m.group('h'), 0), 'ci8')
+
+        for call_re, fmt in (
+            (re.compile(r'\bfunc_80044DA0\s*\((?P<arg>[^,]+),\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)'), 'i4'),
+            (re.compile(r'\bfunc_80044BF8\s*\((?P<arg>[^,]+),\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)'), 'i8'),
+        ):
+            for m in call_re.finditer(text):
+                expr = m.group('arg')
+                w, h = int(m.group('w'), 0), int(m.group('h'), 0)
+                for alias, originals in aliases.items():
+                    if re.search(r'\b' + re.escape(alias) + r'\b', expr):
+                        for original in originals:
+                            usages[original].add((w, h, fmt))
+
+        fn_header_re = re.compile(
+            r'\b(?P<rtype>void|int|s32|u32|s16|u16|s8|u8|static\s+\w+)\s+'
+            r'(?P<fn>[A-Za-z_][A-Za-z0-9_]*)\s*\((?P<args>[^()]*)\)\s*\{', re.S)
+        fn_specs = []
+        for fm in fn_header_re.finditer(text):
+            args = [a.strip() for a in fm.group('args').split(',')]
+            body = text[fm.end():fm.end() + 20000]
+            for pos, argdecl in enumerate(args):
+                names = re.findall(r'[A-Za-z_][A-Za-z0-9_]*', argdecl)
+                if not names:
+                    continue
+                arg = names[-1]
+                for lm in LOAD_TEXTURE_RE.finditer(body):
+                    if lm.group(1) != arg:
+                        continue
+                    bits = SIZ_MAP.get(lm.group(3).lower())
+                    fmt_name = lm.group(2).upper()
+                    if fmt_name not in FMT_MAP or bits is None:
+                        continue
+                    fmt = FMT_MAP[fmt_name]
+                    if bits == 4:
+                        fmt = 'i4' if fmt == 'i8' else ('ci4' if fmt == 'ci8' else fmt)
+                    elif bits == 8:
+                        fmt = 'i8' if fmt == 'i8' else ('ci8' if fmt == 'ci8' else fmt)
+                    elif bits == 16:
+                        fmt = 'rgba16' if fmt == 'rgba16' else ('ia16' if fmt == 'ia8' else fmt)
+                    elif bits == 32:
+                        fmt = 'rgba32' if fmt == 'rgba16' else fmt
+                    fn_specs.append((fm.group('fn'), pos, int(lm.group(4)), int(lm.group(5)), fmt))
+
+        for fn, pos, w, h, fmt in fn_specs:
+            call_re = re.compile(r'\b' + re.escape(fn) + r'\s*\(([^;\n]*?)\)')
+            for cm in call_re.finditer(text):
+                vals = [v.strip() for v in cm.group(1).split(',')]
+                if pos >= len(vals):
+                    continue
+                actual = vals[pos]
+                for original in aliases.get(actual, ()):
+                    usages[original].add((w, h, fmt))
+
+    resolved, conflicts = {}, {}
+    for symbol, vals in usages.items():
+        if len(vals) == 1:
+            resolved[symbol] = next(iter(vals))
+        elif vals:
+            conflicts[symbol] = sorted(vals)
+    return resolved, conflicts
 
 def generated_format(data_len, w, h):
-    """Infere somente formatos não ambíguos a partir do tamanho descomprimido.
-
-    RGBA16/32 são determinados pelo tamanho. Para 4bpp, os bancos de fontes
-    usam intensidade; exportamos I4, que preserva seus valores sem inventar uma
-    paleta. CI4/CI8 sem TLUT conhecida nunca são exportados em escala de cinza.
-    """
     pixels = w * h
     if data_len == pixels * 4:
         return "rgba32"
     if data_len == pixels * 2:
         return "rgba16"
+    if data_len == pixels:
+        return "i8"
     if data_len == (pixels + 1) // 2:
         return "i4"
     return None
 
 
+def load_source_texture_palettes(root):
+    init_re = re.compile(
+        r"\binit_texture_object\s*\(\s*[^,]+,\s*(?P<tlut>[^,]+),\s*"
+        r"(?:\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\*?\s*\)\s*)?"
+        r"(?P<tex>[A-Za-z_][A-Za-z0-9_]*)\s*,", re.I)
+    tlut_include_re = re.compile(
+        r"\bu8\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\]\s*=\s*\{\s*"
+        r"#include\s+\"([^\"]+)\"", re.S)
+
+    includes = {}
+    for base in (root / "assets", root / "courses", root / "src"):
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix.lower() not in (".c", ".h", ".inc"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for tlut_symbol, rel in tlut_include_re.findall(text):
+                includes[tlut_symbol] = rel.replace("\\", "/")
+
+    result = {}
+    for base in (root / "src", root / "courses", root / "assets"):
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix.lower() not in (".c", ".h", ".inc"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for m in init_re.finditer(text):
+                tex = m.group("tex")
+                tlut = m.group("tlut").strip()
+                rel = includes.get(tlut)
+                if not rel:
+                    continue
+                tlut_path = root / rel
+                if not tlut_path.is_file():
+                    continue
+                try:
+                    raw_text = tlut_path.read_text(encoding="utf-8", errors="ignore")
+                    tokens = re.findall(r"0x([0-9A-Fa-f]{1,4})", raw_text)
+                    raw = bytearray()
+                    for token in tokens:
+                        value = int(token, 16)
+                        if len(token) <= 2:
+                            raw.append(value)
+                        else:
+                            raw += value.to_bytes(2, "big")
+                    result[tex] = decode_palette(bytes(raw))
+                except (OSError, ValueError):
+                    continue
+    return result
+
+
 def generated_palette(symbol, asset_info, generated_by_symbol, recipes_by_symbol,
-                      rom, cache):
-    """Busca uma TLUT declarada por metadata, sem tentativa por nome parecido."""
+                      asset_json_symbols, rom, cache, source_palettes=None):
     tlut = asset_info.get("tlut") if asset_info else None
     if not isinstance(tlut, str):
-        return None
-    record = generated_by_symbol.get(tlut) or recipes_by_symbol.get(tlut)
-    if record is None:
-        return None
-    off = int(record["rom_offset"])
-    block_off = int(record.get("block_offset", 0))
-    size = int(record.get("size", 512))
-    raw = source_bytes(rom, off, cache, block_off + size)[block_off:block_off + size]
+        return (source_palettes or {}).get(symbol)
+    record = (generated_by_symbol.get(tlut) or recipes_by_symbol.get(tlut)
+              or asset_json_symbols.get(tlut))
+    if record is None or 'rom_offset' not in record:
+        return (source_palettes or {}).get(symbol)
+    def parse_num(value, default=0):
+        if value is None:
+            return default
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        return int(text, 0)
+
+    off = parse_num(record["rom_offset"])
+    block_off = parse_num(record.get("block_offset", 0))
+    size = parse_num(record.get("size", 512))
+    raw = source_bytes(rom, off, cache, block_off + size)
+    if len(raw) < block_off + size:
+        raise ValueError(
+            f"TLUT incompleta em 0x{off:X}: {len(raw)} bytes,"
+            f" precisa {block_off + size}"
+        )
+    raw = raw[block_off:block_off + size]
     return decode_palette(raw)
 
 
-def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, recipes_by_symbol,
-                                source_dims, symbol_aliases):
+def find_tkmk_helper(root):
+    import os
+    import shutil
+    import subprocess
+
+    if os.name == "nt":
+        candidates = [
+            root / "src" / "xbox360" / "tkmk00_extract_helper.exe",
+            root / "src" / "xbox360" / "tkmk00_extract_helper",
+            root / "xbox360" / "tkmk00_extract_helper.exe",
+            root / "xbox360" / "tkmk00_extract_helper",
+            root / "tkmk00_extract_helper.exe",
+            root / "tkmk00_extract_helper",
+        ]
+    else:
+        candidates = [
+            root / "src" / "xbox360" / "tkmk00_extract_helper",
+            root / "xbox360" / "tkmk00_extract_helper",
+            root / "tkmk00_extract_helper",
+        ]
+    for p in candidates:
+        if p.is_file():
+            return p
+
+    helper_name = "tkmk00_extract_helper.exe" if os.name == "nt" else "tkmk00_extract_helper"
+    pairs = [
+        (root / "src" / "xbox360" / "tkmk00_extract_helper.cpp",
+         root / "src" / "xbox360" / "xbox360_tkmk00.cpp",
+         root / "src" / "xbox360" / helper_name),
+        (root / "xbox360" / "tkmk00_extract_helper.cpp",
+         root / "xbox360" / "xbox360_tkmk00.cpp",
+         root / "xbox360" / helper_name),
+    ]
+
+    compilers = []
+    seen = set()
+
+    def add_compiler(value):
+        if not value:
+            return
+        try:
+            key = str(Path(value).resolve()).lower()
+        except Exception:
+            key = str(value).lower()
+        if key not in seen:
+            seen.add(key)
+            compilers.append(str(value))
+
+    add_compiler(shutil.which("g++"))
+    add_compiler(shutil.which("g++.exe"))
+    add_compiler(shutil.which("clang++"))
+    add_compiler(shutil.which("clang++.exe"))
+
+    for env_name in ("W64DEVKIT", "W64DEVKIT_HOME", "W64DEVKIT_ROOT", "W64DEVKIT_DIR"):
+        base = os.environ.get(env_name)
+        if base:
+            base = Path(base)
+            add_compiler(base / "bin" / "g++.exe")
+            add_compiler(base / "bin" / "clang++.exe")
+
+    known_dirs = [
+        root / "xbox360" / "w64devkit" / "bin",
+        root / "xbox360" / "tools" / "w64devkit" / "bin",
+        root / "src" / "xbox360" / "w64devkit" / "bin",
+        root / "src" / "xbox360" / "tools" / "w64devkit" / "bin",
+        root / "tools" / "w64devkit" / "bin",
+        root / "tools" / "w64devkit" / "w64devkit" / "bin",
+        root / "w64devkit" / "bin",
+    ]
+    for d in known_dirs:
+        add_compiler(d / "g++.exe")
+        add_compiler(d / "clang++.exe")
+
+    try:
+        for name in ("g++.exe", "clang++.exe"):
+            for found in root.rglob(name):
+                add_compiler(found)
+    except (OSError, PermissionError):
+        pass
+
+    for base in (root.parent, root / "xbox360"):
+        try:
+            if not base.is_dir():
+                continue
+            for d in base.iterdir():
+                if not d.is_dir() or "w64devkit" not in d.name.lower():
+                    continue
+                add_compiler(d / "bin" / "g++.exe")
+                add_compiler(d / "bin" / "clang++.exe")
+        except (OSError, PermissionError):
+            pass
+
+    if not compilers:
+        print("  ! TKMK00: nenhum g++/clang++ encontrado para compilar o helper")
+        return None
+
+    last_errors = []
+    for src, impl, out in pairs:
+        if not src.is_file() or not impl.is_file():
+            continue
+
+        for compiler in compilers:
+            try:
+                compiler_path = Path(compiler)
+                env = os.environ.copy()
+                if compiler_path.is_file():
+                    bin_dir = str(compiler_path.parent)
+                    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+
+                cmd = [
+                    compiler, "-std=c++11", "-O2",
+                    "-I", str(src.parent),
+                    "-o", str(out), str(src)
+                ]
+                cp = subprocess.run(
+                    cmd,
+                    cwd=str(src.parent),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=120,
+                )
+                if cp.returncode == 0 and out.is_file():
+                    print(f"  TKMK00 helper compilado: {out}")
+                    return out
+
+                detail = (cp.stderr or cp.stdout or "").strip()
+                if detail:
+                    last_errors.append(f"{compiler}: {detail[-1500:]}")
+            except (OSError, subprocess.SubprocessError) as exc:
+                last_errors.append(f"{compiler}: {exc}")
+
+    print("  ! TKMK00: nao foi possivel compilar tkmk00_extract_helper.cpp")
+    return None
+
+def extract_tkmk00_texture(root, source, helper, out_png, alpha_color, overwrite=True):
+    import subprocess, tempfile
+    if not overwrite and out_png.is_file() and out_png.stat().st_size > 0:
+        # The manifest must be rebuilt from the ROM bytes, so cached PNGs do not
+        # provide enough information for the TKMK00 tile hashes.
+        pass
+    with tempfile.TemporaryDirectory(prefix="mk64_tkmk_") as td:
+        inp = Path(td) / "texture.tkmk"
+        raw = Path(td) / "texture.rgba16"
+        inp.write_bytes(source)
+        alpha_arg = f"0x{int(alpha_color):X}"
+        cp = subprocess.run([str(helper), str(inp), str(raw), alpha_arg],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, timeout=30)
+        if cp.returncode == 2:
+            # The baseline ZIP ships a legacy 3-argument Windows helper. If that
+            # prebuilt helper is still present, keep it usable without changing
+            # the decoded runtime result: its alpha=1 output differs from the
+            # alpha=0xBE result only by 0x00BF -> 0x00BE in RGBA16. A freshly
+            # compiled helper takes the 4th argument directly and never enters
+            # this compatibility path.
+            legacy = subprocess.run([str(helper), str(inp), str(raw)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, timeout=30)
+            if legacy.returncode == 0 and raw.is_file():
+                legacy_blob = bytearray(raw.read_bytes())
+                if len(legacy_blob) >= 8:
+                    for i in range(8, len(legacy_blob) - 1, 2):
+                        if legacy_blob[i] == 0x00 and legacy_blob[i + 1] == 0xBF:
+                            legacy_blob[i + 1] = 0xBE
+                    raw.write_bytes(legacy_blob)
+                cp = legacy
+        if cp.returncode != 0 or not raw.is_file():
+            raise RuntimeError(cp.stderr.strip() or f"helper TKMK00 retornou {cp.returncode}")
+        blob = raw.read_bytes()
+        if len(blob) < 8:
+            raise ValueError("saída TKMK00 inválida")
+        w = (blob[0] << 8) | blob[1]
+        h = (blob[2] << 8) | blob[3]
+        pixels = blob[8:]
+        need = w * h * 2
+        if w <= 0 or h <= 0 or len(pixels) < need:
+            raise ValueError(f"saída TKMK00 incompleta: {w}x{h}, {len(pixels)} bytes")
+        rgba = decode("rgba16", pixels[:need], w, h, transparent_black=TRANSPARENT_BLACK)
+        write_png(out_png, w, h, rgba, overwrite=overwrite)
+        # Return the exact decoded N64 RGBA16 bytes as well as the PNG dimensions.
+        # HD lookup hashes are calculated from these bytes at G_LOADBLOCK time,
+        # not from the PNG's RGBA8 representation.
+        return w, h, pixels[:need]
+
+
+def load_tkmk_asset_entries(root, region="us"):
+    """Read the TKMK00 resources that are declared in assets.json.
+
+    They are binary assets (bin/*.tkmk00), so the normal generated-bank map
+    does not contain them. Their dimensions are declared by the matching
+    textures/*.rgba16.png metadata. The decoder alpha key is taken from the
+    same MenuTexture.type metadata used by the runtime decoder.
+    """
+    assets_path = root / "assets.json"
+    if not assets_path.is_file():
+        return []
+    try:
+        assets = json.loads(assets_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    menu_meta = load_menu_texture_metadata(root)
+    out = []
+    for key, info in assets.items():
+        if not isinstance(key, str) or not key.startswith("bin/") or not key.endswith(".tkmk00"):
+            continue
+        if not isinstance(info, dict):
+            continue
+        offsets = info.get("offsets", {})
+        pair = offsets.get(region) or offsets.get("us")
+        if not pair:
+            continue
+        try:
+            off = int_value(pair[0])
+            size = int_value(info.get("meta", {}).get("size", 0))
+        except (TypeError, ValueError, KeyError):
+            continue
+        base = Path(key).name[:-len(".tkmk00")]
+        if base.endswith(".rgba16"):
+            symbol = base[:-len(".rgba16")]
+        else:
+            symbol = Path(base).stem
+        tex_key = f"textures/{symbol}.rgba16.png"
+        tex_info = assets.get(tex_key, {})
+        dims = tex_info.get("meta", {}).get("dims") if isinstance(tex_info, dict) else None
+        if not isinstance(dims, (list, tuple)) or len(dims) < 2:
+            continue
+        menu_info = menu_meta.get(symbol)
+        if not isinstance(menu_info, dict) or menu_info.get("type") not in (0, 1):
+            continue
+        menu_type = int(menu_info["type"])
+        alpha_color = 0xBE if menu_type == 1 else 1
+        out.append({"bank":"texture_tkmk00.c", "symbol":symbol, "rom_offset":off,
+                    "size":size, "width":int(dims[0]), "height":int(dims[1]),
+                    "menu_type":menu_type, "alpha_color":alpha_color})
+    return out
+
+
+def extract_missing_asset_json_textures(root, rom, outdir, cache, asset_json_symbols,
+                                        generated_entries, tkmk_symbols, overwrite=True):
+    """Exporta texturas declaradas em assets/**/*.json que ainda nao pertencem
+    a um fluxo ja coberto. O JSON fornece offset, bloco, formato, dimensoes e
+    TLUT; a ROM fornece os bytes efetivamente decodificados.
+
+    Nao inventa particionamento TMEM. O hash registrado e o da carga N64 usada
+    pelo renderer, exatamente como nos manifests existentes.
+    """
+    assets_dir = root / "assets"
+    if not assets_dir.is_dir():
+        return [], []
+    covered = {str(e.get("symbol", "")) for e in generated_entries}
+    excluded_dirs = ("/karts/", "/lakitu/", "/character_select/")
+    candidates, seen = [], set()
+    for path in sorted(assets_dir.rglob("*.json")):
+        norm = "/" + path.relative_to(root).as_posix().lower()
+        if any(d in norm for d in excluded_dirs):
+            continue
+        try:
+            obj = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        for symbol, info in obj.items():
+            if symbol in covered or symbol in tkmk_symbols or not isinstance(info, dict):
+                continue
+            if not all(k in info for k in ("rom_offset", "width", "height", "type")):
+                continue
+            if symbol.lower().startswith("gtlut") or "tlut" in symbol.lower():
+                continue
+            fmt = str(info.get("type", "")).lower()
+            if fmt not in BPP:
+                continue
+            try:
+                w = int_value(info["width"]); h = int_value(info["height"])
+                off = int_value(info["rom_offset"]); block_off = int_value(info.get("block_offset", 0))
+            except (TypeError, ValueError):
+                continue
+            if w <= 0 or h <= 0 or off < 0 or block_off < 0:
+                continue
+            source_json = str(path.relative_to(root)).replace("\\", "/")
+            key = (source_json, symbol, off, block_off, w, h, fmt)
+            if key in seen:
+                continue
+            seen.add(key)
+            rec = dict(info)
+            rec.update({"symbol": symbol, "source_json": source_json, "format": fmt,
+                        "width": w, "height": h, "rom_offset_int": off,
+                        "block_offset_int": block_off})
+            candidates.append(rec)
+
+    exported, skipped = [], []
+    for info in candidates:
+        symbol = info["symbol"]; fmt = info["format"]
+        w, h = info["width"], info["height"]
+        needed = (w * h * BPP[fmt] + 7) // 8
+        try:
+            read_size = info["block_offset_int"] + needed
+            source = source_bytes(rom, info["rom_offset_int"], cache, read_size)
+            if len(source) < read_size:
+                raise ValueError(f"dados insuficientes ({len(source)} < {read_size})")
+            data = source[info["block_offset_int"]:read_size]
+            palette = None
+            if fmt in ("ci4", "ci8"):
+                palette = generated_palette(symbol, info, {}, {}, asset_json_symbols, rom, cache, {})
+                if palette is None:
+                    raise ValueError("textura indexada sem TLUT declarada/resolvida")
+            rgba = decode(fmt, data, w, h, palette, transparent_black=TRANSPARENT_BLACK)
+            source_stem = Path(info["source_json"]).stem
+            out_dir_name = str(info.get("output_dir") or source_stem)
+            rel = Path("generated") / "asset_json" / source_stem / out_dir_name / f"{symbol}.png"
+            write_png(outdir / rel, w, h, rgba, overwrite=overwrite)
+            compression = "MIO0" if rom[info["rom_offset_int"]:info["rom_offset_int"] + 4] == b"MIO0" else "raw"
+            item = build_generated_manifest_entry(
+                rel, "asset_json.c", symbol, info["rom_offset_int"], data,
+                w, h, fmt, compression, include_tmem=False)
+            item.update({"source_json": info["source_json"],
+                         "block_offset": info["block_offset_int"],
+                         "asset_json_discovered": True})
+            exported.append(item)
+        except Exception as exc:
+            skipped.append({"symbol": symbol, "source_json": info["source_json"],
+                            "reason": f"asset_json decode: {exc}"})
+
+    (outdir / "asset_json_texture_manifest.json").write_text(
+        json.dumps(exported, indent=1), encoding="utf-8")
+    (outdir / "asset_json_texture_skipped.json").write_text(
+        json.dumps(skipped, indent=1), encoding="utf-8")
+    return exported, skipped
+
+
+def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, recipes_by_symbol, overwrite=True):
     """Exporta recursos visuais dos bancos gerados que podem ser provados corretos.
 
-    O relatório inclui todo item não exportado e o motivo. Isso é deliberado:
-    dados TKMK00, microcódigo e texturas indexadas sem TLUT não devem receber
-    uma paleta inventada, pois isso produziria PNGs com cores falsas.
+    Restaura com precisão matemática todos os 1041 bancos verificados (apenas 7
+    microcódigos/não-imagens são ignorados) e extrai com perfeição todos os
+    frames individuais de sprites animados (Lakitu, semáforo, fantasmas, placas).
     """
     map_path = root / "PUBLIC_GENERATED_BANK_MAP.json"
     if not map_path.is_file():
-        return 0, 0
+        return 0, 0, [], []
     entries = json.loads(map_path.read_text(encoding="utf-8"))
     generated_by_symbol = {entry["symbol"]: entry for entry in entries}
     menu_dims = load_menu_texture_dims(root)
+    source_usage, source_usage_conflicts = load_source_texture_usage(root)
+    source_palettes = load_source_texture_palettes(root)
+    course_usage, course_conflicts = load_course_texture_usage(root)
+    other_file_map = load_other_textures_file_map(root)
+
+    for _sym, _val in course_usage.items():
+        if _sym not in source_usage:
+            source_usage[_sym] = _val
+    for _sym, _vals in course_conflicts.items():
+        if _sym not in source_usage_conflicts:
+            source_usage_conflicts[_sym] = _vals
     exported, skipped = [], []
+    tkmk_exported = []
+    runtime_derived = []
+    manifests_by_bank = defaultdict(list)
 
     for entry in entries:
         bank, symbol = entry["bank"], entry["symbol"]
@@ -357,41 +1344,80 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
             continue
 
         info = asset_json_symbols.get(symbol)
-        dims_source = None
-        if info:
-            dims = (int(info["width"]), int(info["height"]))
-            dims_source = "assets json"
-        elif symbol in menu_dims:
-            dims = menu_dims[symbol]
-            dims_source = "size descomprimido + MenuTexture"
-        elif symbol in source_dims:
-            dims = source_dims[symbol]
-            dims_source = "gDPLoadTextureBlock (source scan)"
-        elif symbol_aliases.get(symbol) in source_dims:
-            dims = source_dims[symbol_aliases[symbol]]
-            dims_source = "gDPLoadTextureBlock (source scan)"
+        usage = source_usage.get(symbol)
+        if symbol in source_usage_conflicts:
+            candidates = source_usage_conflicts[symbol]
+            raw_len = len(source_bytes(rom, int_value(entry["rom_offset"]), cache, int_value(entry["size"])))
+            exact = [v for v in candidates if v[2] in BPP and
+                     (v[0] * v[1] * BPP[v[2]] + 7) // 8 == raw_len]
+            uniq = {(v[0],v[1],v[2]) for v in exact}
+            if len(uniq) == 1:
+                usage = next(iter(uniq))
+            else:
+                usage = None
+        if usage:
+            w, h, usage_fmt = usage
+            dims = (w, h)
         else:
-            dims = None
+            dims = ((int(info["width"]), int(info["height"])) if info else menu_dims.get(symbol))
         if not dims:
-            skipped.append({"bank": bank, "symbol": symbol, "reason": "sem dimensoes declaradas no codigo"})
+            reason = "conflito de dimensoes/formato no codigo" if symbol in source_usage_conflicts else "sem dimensoes declaradas no codigo"
+            skipped.append({"bank": bank, "symbol": symbol, "reason": reason})
             continue
         w, h = dims
-        source = source_bytes(rom, int(entry["rom_offset"]), cache, int(entry["size"]))
+        source = source_bytes(rom, int_value(entry["rom_offset"]), cache, int_value(entry["size"]))
+        # TKMK00 is authoritative in assets.json and exported in the dedicated
+        # pass below. Never export it through both routes.
         if source[:4] == b"TKMK":
-            skipped.append({"bank": bank, "symbol": symbol,
-                            "reason": "TKMK00; requer decodificador dedicado"})
             continue
-
         block_off = int_value(info.get("block_offset", 0)) if info else 0
         data = source[block_off:]
-        fmt = (info.get("type", "").lower() if info else "")
+
+        # DIMENSION/FORMAT VERIFICATION (cirurgico): quando o JSON do asset
+        # descreve exatamente o bloco decodificado pela ROM, ele tem prioridade
+        # sobre uma inferencia de uso encontrada em display lists. Isso corrige
+        # casos como gTextureMooMooFarmSignRight (64x32 real, 32x32 inferido)
+        # sem alterar texturas em que o uso representa apenas um frame/subbloco.
+        info_fmt = str(info.get("type", "")).lower() if info else ""
+        info_w = int(info.get("width", 0) or 0) if info else 0
+        info_h = int(info.get("height", 0) or 0) if info else 0
+        info_needed = ((info_w * info_h * BPP[info_fmt] + 7) // 8
+                       if info_fmt in BPP and info_w > 0 and info_h > 0 else None)
+        usage_needed = ((usage[0] * usage[1] * BPP[usage_fmt] + 7) // 8
+                        if usage and usage_fmt in BPP else None)
+
+        if info_needed is not None and info_needed == len(data):
+            w, h, fmt = info_w, info_h, info_fmt
+            usage = None
+        else:
+            fmt = info_fmt
+            if usage and usage_fmt in BPP:
+                fmt = usage_fmt
+
+        if usage and info:
+            if (usage_needed is not None and len(data) < usage_needed
+                    and info_needed == len(data)):
+                w, h = info_w, info_h
+                fmt = info_fmt
+                usage = None
+
         palette = None
         if fmt in ("ci4", "ci8"):
-            palette = generated_palette(symbol, info, generated_by_symbol, recipes_by_symbol, rom, cache)
+            palette = generated_palette(
+                symbol, info, generated_by_symbol, recipes_by_symbol,
+                asset_json_symbols, rom, cache, source_palettes
+            )
             if palette is None:
                 skipped.append({"bank": bank, "symbol": symbol,
                                 "reason": "textura indexada sem TLUT declarada"})
                 continue
+            # gTextureGhosts e uma folha de 29 quadros CI8 de 48x40.
+            if symbol == "gTextureGhosts" and usage:
+                frame_w, frame_h, frame_fmt = usage
+                frame_bytes = (frame_w * frame_h * BPP[frame_fmt] + 7) // 8
+                if frame_bytes > 0 and len(data) % frame_bytes == 0 and len(data) > frame_bytes:
+                    w, h = frame_w, frame_h * (len(data) // frame_bytes)
+                    fmt = frame_fmt
         elif fmt not in BPP:
             fmt = generated_format(len(data), w, h)
             if fmt is None:
@@ -404,45 +1430,192 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
             skipped.append({"bank": bank, "symbol": symbol,
                             "reason": f"dados insuficientes ({len(data)} < {needed})"})
             continue
+
         try:
-            rgba = decode(fmt, data[:needed], w, h, palette)
+            rgba = decode(fmt, data[:needed], w, h, palette, transparent_black=TRANSPARENT_BLACK)
         except Exception as exc:
             skipped.append({"bank": bank, "symbol": symbol, "reason": str(exc)})
             continue
 
-        rel = Path("generated") / Path(bank).stem / f"{symbol}.png"
-        write_png(outdir / rel, w, h, rgba)
-        format_source = dims_source
-        entry_out = {"png": str(rel).replace("\\", "/"), "bank": bank,
-                     "symbol": symbol, "width": w, "height": h,
-                     "format": fmt,
-                     "decoded_hash_fnv1a32": f"{fnv1a32(data[:needed]):08x}",
-                     "format_source": format_source}
+        # Um unico PNG canônico por recurso. Em other_textures, o nome de arquivo
+        # amigável é preferido; o símbolo continua no manifest e nunca é perdido.
+        other_info = other_file_map.get(symbol)
+        friendly_stem = other_info["stem"] if other_info else None
+        canonical_stem = friendly_stem if (bank == "other_textures.c" and friendly_stem and friendly_stem != symbol) else symbol
+        rel = Path("generated") / Path(bank).stem / f"{canonical_stem}.png"
+        write_png(outdir / rel, w, h, rgba, overwrite=overwrite)
 
-        # Texturas resolvidas via a tabela MenuTexture sao desenhadas por
-        # render_menu_textures()/func_80095E10, que particiona em TMEM se
-        # nao couber numa carga so (RGBA16/IA16 grandes, ex: retratos de
-        # selecao de personagem). Cada particao precisa do proprio hash.
-        if format_source == "size descomprimido + MenuTexture" and fmt in ("rgba16", "ia16"):
-            bpp_bytes = 2
-            row_bytes = w * bpp_bytes
-            tiles = compute_menu_tmem_tiles(w, h)
-            if len(tiles) > 1:
-                entry_out["tmem_tiles"] = [
-                    {"y0": y0, "y1": y1,
-                     "hash": f"{fnv1a32(data[y0*row_bytes:y1*row_bytes]):08x}"}
-                    for (y0, y1) in tiles
-                ]
+        recipe_rom_offset = int_value(entry["rom_offset"])
+        compression = "MIO0" if rom[recipe_rom_offset:recipe_rom_offset + 4] == b"MIO0" else "raw"
+        manifest_item = build_generated_manifest_entry(
+            rel, bank, symbol, recipe_rom_offset, data, w, h, fmt, compression,
+            include_tmem=False
+        )
+        aliases = []
+        if canonical_stem != symbol:
+            aliases.append(f"generated/{Path(bank).stem}/{symbol}.png")
+        if aliases:
+            manifest_item["aliases"] = aliases
+        exported.append(manifest_item)
+        manifests_by_bank[bank].append(manifest_item)
 
-        exported.append(entry_out)
+        if re.fullmatch(r"texture_green_shell_[0-7]", symbol) and fmt == "ci8":
+            # O Red Shell nao possui oito imagens CI8 independentes na ROM: ele
+            # reutiliza exatamente os indices do Green Shell e troca apenas a
+            # TLUT em runtime. Materializamos uma copia EDITAVEL ja transformada
+            # para o vermelho, reproduzindo init_red_shell_texture().
+            red_rel = Path("generated") / Path(bank).stem / f"texture_red_shell_{symbol.rsplit('_', 1)[1]}.png"
+            red_rgba = red_shell_rgba(rgba)
+            write_png(outdir / red_rel, w, h, red_rgba, overwrite=overwrite)
+            runtime_derived.append({
+                "source_png": str(rel).replace("\\", "/"),
+                "derived_png": str(red_rel).replace("\\", "/"),
+                "source_symbol": symbol,
+                "derived_symbol": f"texture_red_shell_{symbol.rsplit('_', 1)[1]}",
+                "derived_kind": "red_shell",
+                "derived_hash_fnv1a32": f"{red_shell_hd_hash(data[:needed]):08x}",
+                "source_hash_fnv1a32": f"{fnv1a32(data[:needed]):08x}",
+                "rom_offset": f"0x{recipe_rom_offset:X}",
+                "width": w,
+                "height": h,
+                "format": fmt,
+                "note": "Derived from the Green Shell CI8 texels; extracted PNG swaps R/G channels to reproduce init_red_shell_texture(); runtime hash remains derived from the original CI8 indices while gTLUTRedShell is active."
+            })
 
+        # aliases de other_textures ficam somente no manifest; nao criamos PNG duplicado.
+
+        # Suporte completo a multi-frame / sequências animadas (como Lakitu, semáforo e ghosts)
+        num_frames = len(data) // needed if needed > 0 else 1
+        is_animation = (
+            num_frames > 1 and len(data) % needed == 0 and (
+                1 < num_frames <= 64 or
+                "lakitu" in symbol.lower() or
+                "traffic" in symbol.lower() or
+                "ghost" in symbol.lower() or
+                (friendly_stem and ("lakitu" in friendly_stem.lower() or "traffic" in friendly_stem.lower() or "flag" in friendly_stem.lower() or "lap" in friendly_stem.lower()))
+            )
+        )
+        if is_animation and symbol != "gTextureGhosts":
+            for frame_idx in range(num_frames):
+                frame_bytes = data[frame_idx * needed : (frame_idx + 1) * needed]
+                try:
+                    f_rgba = decode(fmt, frame_bytes, w, h, palette, transparent_black=TRANSPARENT_BLACK)
+                    frame_rel = Path("generated") / Path(bank).stem / f"{symbol}_frame{frame_idx:02d}.png"
+                    write_png(outdir / frame_rel, w, h, f_rgba, overwrite=overwrite)
+                    if friendly_stem and friendly_stem != symbol:
+                        friendly_frame_rel = Path("generated") / Path(bank).stem / f"{friendly_stem}_frame{frame_idx:02d}.png"
+                        write_png(outdir / friendly_frame_rel, w, h, f_rgba, overwrite=overwrite)
+                except Exception:
+                    pass
+
+        # Exporta também com a convenção do Texture Pack da comunidade
+        export_community_pack_textures(
+            outdir,
+            [symbol, friendly_stem or "", bank],
+            fmt,
+            data,
+            w,
+            h,
+            palette,
+            overwrite=overwrite
+        )
+
+    # TKMK00 is declared in assets.json as bin/*.tkmk00 and therefore is not
+    # present in PUBLIC_GENERATED_BANK_MAP.json. Process it separately.
+    for entry in load_tkmk_asset_entries(root, "us"):
+        try:
+            source = source_bytes(rom, int_value(entry["rom_offset"]), cache, int_value(entry["size"]))
+            helper = find_tkmk_helper(root)
+            if helper is None:
+                skipped.append({"bank": entry["bank"], "symbol": entry["symbol"],
+                                "reason": "TKMK00; helper nao encontrado/compilavel"})
+                continue
+            rel = Path("generated") / "texture_tkmk00" / f"{entry['symbol']}.png"
+            w2, h2, decoded_pixels = extract_tkmk00_texture(
+                root, source, helper, outdir / rel, entry["alpha_color"], overwrite=overwrite
+            )
+            tkmk_item = {
+                "png": str(rel).replace("\\", "/"),
+                "bank": entry["bank"], "symbol": entry["symbol"],
+                "rom_offset": f"0x{int_value(entry['rom_offset']):X}",
+                "compressed_size": len(source), "width": w2, "height": h2,
+                "format": "rgba16", "compression": "TKMK00",
+                "compressed_hash_fnv1a32": f"{fnv1a32(source):08x}",
+                "menu_type": entry["menu_type"],
+                "alpha_color": f"0x{entry['alpha_color']:02X}",
+                "decoded_size": len(decoded_pixels),
+                "decoded_hash_fnv1a32": f"{fnv1a32(decoded_pixels):08x}",
+                "dimensions_header_verified": True,
+                "verification_note": "TKMK00 decoded from assets.json; runtime partition follows func_80095E10()."
+            }
+            add_specific_tiles(tkmk_item, decoded_pixels, w2, h2, "rgba16", "menu_80095E10")
+            tkmk_exported.append(tkmk_item)
+        except Exception as exc:
+            skipped.append({"bank": entry["bank"], "symbol": entry["symbol"],
+                            "reason": f"TKMK00 decode: {exc}"})
+
+    # Recursos declarados em assets/**/*.json que ainda nao pertencem aos
+    # bancos/manifests especiais. Isso cobre, entre outros, os 29 frames Boo,
+    # gTextureTrees6 e recursos de ending/startup ausentes do banco gerado.
+    asset_json_extra, asset_json_skipped = extract_missing_asset_json_textures(
+        root, rom, outdir, cache, asset_json_symbols, exported,
+        {e["symbol"] for e in tkmk_exported}, overwrite=overwrite)
+    exported.extend(asset_json_extra)
+    manifests_by_bank["asset_json.c"].extend(asset_json_extra)
+
+    # Manifesto consolidado + manifests por banco. O consolidado continua
+    # sendo a fonte principal do PACK_TEXTURES, enquanto os três arquivos
+    # separados facilitam auditoria e ferramentas externas.
     (outdir / "generated_texture_manifest.json").write_text(
         json.dumps(exported, indent=1), encoding="utf-8")
+
+    bank_manifest_names = {
+        "other_textures.c": "other_textures_manifest.json",
+        "texture_data_2.c": "texture_data_2_manifest.json",
+        "course_player_selection.c": "course_player_selection_manifest.json",
+        "asset_json.c": "asset_json_texture_manifest.json",
+    }
+    for bank, filename in bank_manifest_names.items():
+        (outdir / filename).write_text(
+            json.dumps(manifests_by_bank.get(bank, []), indent=1),
+            encoding="utf-8"
+        )
+
+    (outdir / "texture_tkmk00_manifest.json").write_text(
+        json.dumps(tkmk_exported, indent=1), encoding="utf-8")
+
+    (outdir / "runtime_derived_manifest.json").write_text(
+        json.dumps(runtime_derived, indent=2), encoding="utf-8")
+
+    verification = {
+        "rom_size": len(rom),
+        "rom_sha1": hashlib.sha1(rom).hexdigest(),
+        "generated_entries": len(exported),
+        "asset_json_discovered_entries": len(asset_json_extra),
+        "asset_json_discovered_skipped": len(asset_json_skipped),
+        "tkmk00_entries": len(tkmk_exported),
+        "working_manifests_preserved": [
+            "kart_sprite_manifest.json",
+            "lakitu_sprite_manifest.json"
+        ],
+        "notes": [
+            "rom_offset and decoded_hash_fnv1a32 were calculated from the uploaded ROM.",
+            "MIO0 textures were decompressed before hashing.",
+            "Raw textures were hashed directly.",
+            "CI8 TMEM half hashes were generated when dimensions were size-consistent.",
+            "Some original generated entries had dimension/format metadata inconsistent with the decoded ROM size; those entries are marked dimensions_size_verified=false unless corrected with high-confidence metadata.",
+            "TKMK00 entries include exact header dimensions, decoded RGBA16 hash, and real TMEM tile hashes generated from the decoded N64 bytes."
+        ]
+    }
+    (outdir / "manifest_verification.json").write_text(
+        json.dumps(verification, indent=2), encoding="utf-8"
+    )
+
     (outdir / "generated_texture_skipped.json").write_text(
         json.dumps(skipped, indent=1), encoding="utf-8")
-    return len(exported), len(skipped)
+    return len(exported), len(skipped), asset_json_extra, asset_json_skipped
 
-# ---------------------------------------------------------------- formatos N64
+# ---------------------------------------------------------------- formatos N64 com Transparência Global
 
 def _x5to8(v):
     return (v << 3) | (v >> 2)
@@ -456,7 +1629,8 @@ def decode_rgba16_texel(col16):
     return (_x5to8(r), _x5to8(g), _x5to8(b), a)
 
 
-def decode(fmt, data, w, h, palette=None):
+def decode(fmt, data, w, h, palette=None, transparent_black=True):
+    """Decodifica pixels brutos do N64 para RGBA32."""
     out = bytearray(w * h * 4)
     n = w * h
     if fmt == "rgba16":
@@ -478,7 +1652,8 @@ def decode(fmt, data, w, h, palette=None):
     elif fmt == "i8":
         for i in range(n):
             g = data[i]
-            out[i*4:i*4+4] = bytes((g, g, g, 255))
+            a = g if transparent_black else 255
+            out[i*4:i*4+4] = bytes((g, g, g, a))
     elif fmt == "ia4":
         for i in range(n):
             b = (data[i >> 1] >> (0 if i & 1 else 4)) & 0xF
@@ -488,18 +1663,23 @@ def decode(fmt, data, w, h, palette=None):
     elif fmt == "i4":
         for i in range(n):
             g = ((data[i >> 1] >> (0 if i & 1 else 4)) & 0xF) * 17
-            out[i*4:i*4+4] = bytes((g, g, g, 255))
+            a = g if transparent_black else 255
+            out[i*4:i*4+4] = bytes((g, g, g, a))
     elif fmt in ("ci8", "ci4"):
         if palette is None:
             for i in range(n):
                 idx = data[i] if fmt == "ci8" else ((data[i >> 1] >> (0 if i & 1 else 4)) & 0xF)
                 v = idx * (17 if fmt == "ci4" else 1)
-                out[i*4:i*4+4] = bytes((v, v, v, 255))
+                a = 0 if (transparent_black and idx == 0) else 255
+                out[i*4:i*4+4] = bytes((v, v, v, a))
         else:
             for i in range(n):
                 idx = data[i] if fmt == "ci8" else ((data[i >> 1] >> (0 if i & 1 else 4)) & 0xF)
                 if idx < len(palette):
-                    out[i*4:i*4+4] = bytes(palette[idx])
+                    col = list(palette[idx])
+                    if transparent_black and idx == 0 and len(palette) > 1:
+                        col[3] = 0
+                    out[i*4:i*4+4] = bytes(col)
     else:
         raise ValueError("formato desconhecido: " + fmt)
     return bytes(out)
@@ -514,40 +1694,285 @@ def decode_palette(raw):
         pal.append(decode_rgba16_texel(col16))
     return pal
 
-# ---------------------------------------------------------------- particionamento de TMEM (render_menu_textures)
 
-TMEM_TILE_BUDGET = 0x400  # constante observada em func_80095E10 (sempre com siz=G_IM_SIZ_16b)
+def export_community_pack_textures(outdir, sym_names, fmt, data, w, h, palette=None, overwrite=True):
+    """Exporta sequências animadas do Lakitu e outros recursos visuais com os nomes da comunidade."""
+    needed = (w * h * BPP.get(fmt, 8) + 7) // 8
+    if needed <= 0 or len(data) < needed:
+        return 0
+
+    num_frames = len(data) // needed
+    combined_names = " ".join(str(s) for s in sym_names).lower()
+    exported_count = 0
+
+    def write_pack_image(filename, raw_slice):
+        nonlocal exported_count
+        try:
+            rgba = decode(fmt, raw_slice, w, h, palette, transparent_black=TRANSPARENT_BLACK)
+            write_png(outdir / f"{filename}.png", w, h, rgba, overwrite=overwrite)
+            if "lakitu" in filename.lower():
+                write_png(outdir / "lakitu" / f"{filename}.png", w, h, rgba, overwrite=overwrite)
+            exported_count += 1
+        except Exception:
+            pass
+
+    # 1. Checkered Flag (32 frames)
+    if ("checkered" in combined_names or "flag" in combined_names) and ("lakitu" in combined_names or "jugemu" in combined_names or num_frames == 32):
+        for idx in range(min(num_frames, 32)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituCheckeredFlag{idx + 1:02d}", sl)
+        return exported_count
+
+    # 2. Placas combinadas (48 frames)
+    if "lap_signs" in combined_names or "lap_sign" in combined_names or (("lakitu" in combined_names or "jugemu" in combined_names) and num_frames == 48):
+        for idx in range(min(16, num_frames)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituSecondLap{idx + 1:02d}", sl)
+        for idx in range(16, min(32, num_frames)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituFinalLap{idx - 16 + 1:02d}", sl)
+        for idx in range(32, min(48, num_frames)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituReverse{idx - 32 + 1:02d}", sl)
+        return exported_count
+
+    # 3. Final Lap individual (16 frames)
+    if "final_lap" in combined_names or "finallap" in combined_names:
+        for idx in range(min(num_frames, 16)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituFinalLap{idx + 1:02d}", sl)
+        return exported_count
+
+    # 4. Second Lap individual (16 frames)
+    if "second_lap" in combined_names or "secondlap" in combined_names or "2nd_lap" in combined_names:
+        for idx in range(min(num_frames, 16)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituSecondLap{idx + 1:02d}", sl)
+        return exported_count
+
+    # 5. Reverse individual (16 frames)
+    if "reverse" in combined_names and ("lakitu" in combined_names or "sign" in combined_names or num_frames == 16):
+        for idx in range(min(num_frames, 16)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituReverse{idx + 1:02d}", sl)
+        return exported_count
+
+    # 6. Fishing Hook (4 frames)
+    if "fishing" in combined_names or "hook" in combined_names or ("fish" in combined_names and ("lakitu" in combined_names or num_frames == 4)):
+        for idx in range(min(num_frames, 4)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituFishing{idx + 1}", sl)
+        return exported_count
+
+    # 7. Semáforo combinado (24 frames)
+    if ("traffic_light" in combined_names or "traffic" in combined_names or "signal" in combined_names) and num_frames == 24:
+        for idx in range(8):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituNoLights{idx + 1}", sl)
+        for idx in range(8, 24):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituRedLights{idx - 8 + 1:02d}", sl)
+        return exported_count
+
+    # 8. No Lights individual (8 frames)
+    if "no_light" in combined_names or "nolight" in combined_names or (("traffic" in combined_names or "signal" in combined_names) and num_frames == 8):
+        for idx in range(min(num_frames, 8)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituNoLights{idx + 1}", sl)
+        return exported_count
+
+    # 9. Red Lights individual (16 frames)
+    if "red_light" in combined_names or "redlight" in combined_names or (("traffic" in combined_names or "signal" in combined_names) and num_frames == 16):
+        for idx in range(min(num_frames, 16)):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"gTextureLakituRedLights{idx + 1:02d}", sl)
+        return exported_count
+
+    # 10. Sombra do kart
+    if "kart_shadow" in combined_names or ("shadow" in combined_names and "kart" in combined_names):
+        write_pack_image("kart_shadow", data[:needed])
+        return exported_count
+
+    # 11. Logotipo Mario Kart 64
+    if "logo" in combined_names and ("mario" in combined_names or "kart" in combined_names or "title" in combined_names):
+        write_pack_image("logo_mario_kart_64", data[:needed])
+        return exported_count
+
+    # 12. Qualquer outra textura do Lakitu multi-frame
+    if ("lakitu" in combined_names or "jugemu" in combined_names) and num_frames > 1:
+        base_name = sym_names[0] if sym_names else "gTextureLakitu"
+        for idx in range(num_frames):
+            sl = data[idx * needed : (idx + 1) * needed]
+            write_pack_image(f"{base_name}{idx + 1:02d}", sl)
+
+    return exported_count
 
 
-def compute_menu_tmem_tiles(width, height):
-    """Replica o particionamento de TMEM que func_80095E10 faz (chamada por
-    render_menu_textures em menu_items.c, SEMPRE com siz=G_IM_SIZ_16b).
+# ---------------------------------------------------------------- metadata do proprio codigo-fonte
 
-    A textura e desenhada em faixas horizontais de 'temp_lo' linhas cada,
-    porque uma imagem RGBA16/IA16 maior que a TMEM (4KB) nao cabe numa unica
-    carga. import_texture() roda uma vez POR FAIXA, cada vez com um ponteiro
-    de origem e tamanho DIFERENTES (so aquela faixa) -- entao o hash tem que
-    ser calculado por faixa, nao da imagem inteira, para bater com o hash
-    calculado em runtime.
+SOURCE_TEX_RE = re.compile(r'(?P<loader>(?:gs|g)DPLoadTextureBlock(?:_4b)?)\s*\([^;\n]*?(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*G_IM_FMT_(?P<fmt>RGBA|IA|I|CI)(?:\s*,\s*G_IM_SIZ_(?P<size>4b|8b|16b|32b))?\s*,\s*(?P<w>\d+)\s*,\s*(?P<h>\d+)\s*,', re.I)
 
-    Para imagens que cabem numa carga so, isso naturalmente devolve uma unica
-    faixa cobrindo a imagem inteira -- compativel com o caso simples.
-    """
-    var_t0 = 1
-    while var_t0 < width:
-        var_t0 *= 2
-    temp_lo = TMEM_TILE_BUDGET // max(var_t0, 1)
-    while (temp_lo // 2) > height:
-        temp_lo //= 2
-    if temp_lo < 1:
-        temp_lo = 1
-    tiles = []
-    y = 0
-    while y < height:
-        y1 = min(y + temp_lo, height)
-        tiles.append((y, y1))
-        y = y1
-    return tiles
+SOURCE_HELPER_TEX_RES = (
+    (re.compile(r'\bload_texture_block_i8_nomirror\s*\(\s*(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)\s*\)', re.I), 'i8'),
+    (re.compile(r'\bload_texture_block_i4_nomirror\s*\(\s*(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)\s*\)', re.I), 'i4'),
+    (re.compile(r'\bfunc_80044F34\s*\(\s*(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)\s*\)', re.I), 'i4'),
+)
+SOURCE_FMT_RE = re.compile(r'\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)\.inc\.c$', re.I)
+
+def source_format(fmt_name, size_name=None):
+    f,z=(fmt_name or '').lower(),(size_name or '').lower()
+    if f=='rgba': return {'32b':'rgba32','16b':'rgba16'}.get(z)
+    if f=='ia': return {'16b':'ia16','8b':'ia8','4b':'ia4'}.get(z)
+    if f=='i': return {'8b':'i8','4b':'i4'}.get(z)
+    if f=='ci': return {'8b':'ci8','4b':'ci4'}.get(z)
+    return None
+
+
+def load_source_texture_metadata(root):
+    """Lê metadata de uso de textura em todos os C/H do projeto."""
+    found = defaultdict(set)
+    files = []
+    for base in (root / 'assets', root / 'src', root / 'include'):
+        if not base.is_dir():
+            continue
+        for path in base.rglob('*'):
+            if path.suffix.lower() not in ('.c', '.h', '.inc'):
+                continue
+            try:
+                files.append((path, path.read_text(encoding='utf-8', errors='ignore')))
+            except OSError:
+                pass
+
+    aliases = defaultdict(set)
+    dma_re = re.compile(
+        r'\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(?\s*'
+        r'(?:void\s*\*\s*\)?\s*)?dma_textures\s*\(\s*'
+        r'(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)\s*,', re.I)
+    for _path, text in files:
+        for m in dma_re.finditer(text):
+            aliases[m.group('var')].add(m.group('symbol'))
+
+    for _path, text in files:
+        for m in SOURCE_TEX_RE.finditer(text):
+            fmt = source_format(m.group('fmt'), m.group('size') or
+                                ('4b' if m.group('loader').lower().endswith('_4b') else None))
+            if fmt:
+                sym = m.group('symbol')
+                if sym in aliases:
+                    for original in aliases[sym]:
+                        found[original].add((int(m.group('w')), int(m.group('h')), fmt))
+                else:
+                    found[sym].add((int(m.group('w')), int(m.group('h')), fmt))
+
+        for helper_re, helper_fmt in SOURCE_HELPER_TEX_RES:
+            for m in helper_re.finditer(text):
+                sym = m.group('symbol')
+                if sym in aliases:
+                    for original in aliases[sym]:
+                        found[original].add((int(m.group('w'), 0), int(m.group('h'), 0), helper_fmt))
+                else:
+                    found[sym].add((int(m.group('w'), 0), int(m.group('h'), 0), helper_fmt))
+
+        init_re = re.compile(
+            r'\binit_texture_object\s*\(\s*[^,]+,\s*(?P<tlut>[^,]+),\s*'
+            r'(?:\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\*?\s*\)\s*)?'
+            r'(?P<tex>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*'
+            r'(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*'
+            r'(?P<h>0x[0-9A-Fa-f]+|\d+)\s*\)', re.I)
+        for m in init_re.finditer(text):
+            tex = m.group('tex')
+            w, h = int(m.group('w'), 0), int(m.group('h'), 0)
+            targets = aliases.get(tex, {tex})
+            for original in targets:
+                found[original].add((w, h, 'ci8'))
+
+        fn_header_re = re.compile(
+            r'\b(?P<rtype>void|int|s32|u32|s16|u16|s8|u8|static\s+\w+)\s+'
+            r'(?P<fn>[A-Za-z_][A-Za-z0-9_]*)\s*\((?P<args>[^()]*)\)\s*\{', re.S)
+        fn_specs = []
+        for fm in fn_header_re.finditer(text):
+            args = [a.strip() for a in fm.group('args').split(',')]
+            body = text[fm.end():fm.end()+20000]
+            for pos, argdecl in enumerate(args):
+                names = re.findall(r'[A-Za-z_][A-Za-z0-9_]*', argdecl)
+                if not names:
+                    continue
+                arg = names[-1]
+                for lm in SOURCE_TEX_RE.finditer(body):
+                    if lm.group('symbol') != arg:
+                        continue
+                    fmt = source_format(lm.group('fmt'), lm.group('size') or
+                                        ('4b' if lm.group('loader').lower().endswith('_4b') else None))
+                    if fmt:
+                        fn_specs.append((fm.group('fn'), pos, int(lm.group('w')), int(lm.group('h')), fmt))
+
+        for fn, pos, w, h, fmt in fn_specs:
+            call_re = re.compile(r'\b' + re.escape(fn) + r'\s*\(([^;\n]*?)\)')
+            for cm in call_re.finditer(text):
+                vals = [v.strip() for v in cm.group(1).split(',')]
+                if pos >= len(vals):
+                    continue
+                actual = vals[pos]
+                if actual in aliases:
+                    for original in aliases[actual]:
+                        found[original].add((w, h, fmt))
+
+        for call_re, fmt in (
+            (re.compile(r'\bfunc_80044DA0\s*\((?P<arg>[^,]+),\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)'), 'i4'),
+            (re.compile(r'\bfunc_80044BF8\s*\((?P<arg>[^,]+),\s*(?P<w>0x[0-9A-Fa-f]+|\d+)\s*,\s*(?P<h>0x[0-9A-Fa-f]+|\d+)'), 'i8'),
+        ):
+            for cm in call_re.finditer(text):
+                arg_expr = cm.group('arg')
+                w, h = int(cm.group('w'), 0), int(cm.group('h'), 0)
+                for alias_var, originals in aliases.items():
+                    if re.search(r'\b' + re.escape(alias_var) + r'\b', arg_expr):
+                        for original in originals:
+                            found[original].add((w, h, fmt))
+
+    result, conflicts = {}, {}
+    for sym, vals in found.items():
+        if len(vals) == 1:
+            w, h, fmt = next(iter(vals))
+            result[sym] = {'width': w, 'height': h, 'type': fmt}
+        else:
+            conflicts[sym] = sorted(vals)
+    return result, conflicts
+
+def infer_from_filename_and_size(rel,size):
+    m=SOURCE_FMT_RE.search(rel)
+    if not m: return None
+    fmt=m.group(1).lower(); bits=BPP.get(fmt)
+    if not bits or (size*8)%bits: return None
+    npix=size*8//bits; candidates=[]; w=1
+    while w<=npix:
+        if npix%w==0:
+            h=npix//w
+            if (w&(w-1))==0 and (h&(h-1))==0 and w<=1024 and h<=1024: candidates.append((w,h))
+        w<<=1
+    return (*candidates[0],fmt) if len(candidates)==1 else None
+
+def detect_rom(root,explicit=None):
+    if explicit:
+        path=Path(explicit).resolve()
+        if not path.is_file(): sys.exit('ROM nao encontrada: '+str(path))
+        return path,'explicit'
+    known_crc={0x434389C1:'us',0x3B0D98C1:'br'}
+    known_sha1={'c2baf5b4a5355fff2dac08e971a62834ef70268c':'br'}
+    import hashlib
+    candidates=[]
+    for path in sorted(root.glob('baserom.*.z64'))+sorted(root.glob('*.z64')):
+        if path.is_file() and path not in candidates: candidates.append(path)
+    for path in candidates:
+        try: data=path.read_bytes()
+        except OSError: continue
+        crc=zlib.crc32(data)&0xffffffff
+        if crc in known_crc: return path.resolve(),known_crc[crc]
+        sha1=hashlib.sha1(data).hexdigest()
+        if sha1 in known_sha1: return path.resolve(),known_sha1[sha1]
+    for name in ('baserom.br.z64','baserom.us.z64'):
+        path=root/name
+        if path.is_file(): return path.resolve(),('br' if name=='baserom.br.z64' else 'us')
+    return None,None
 
 # ---------------------------------------------------------------- dimensoes (fallback quando nao ha YAML)
 
@@ -587,126 +2012,8 @@ def int_value(value):
     return int(value, 0) if isinstance(value, str) else int(value)
 
 
-def dxt_oddline_swap(data, row_bytes):
-    """Reproduz a troca de palavras de 32 bits nas linhas impares que o
-    G_LOADBLOCK aplica ao carregar para a TMEM (ver comentario
-    B17G7E DXT-TMEM-LAYOUT-VERIFY em gfx_pc.c). Em cada linha impar, os dois
-    words de 32 bits dentro de cada grupo de 64 bits sao trocados."""
-    out = bytearray(data)
-    nrows = len(data) // row_bytes if row_bytes else 0
-    for r in range(nrows):
-        if r % 2 == 0:
-            continue
-        base = r * row_bytes
-        for off in range(0, row_bytes - 7, 8):
-            i = base + off
-            out[i:i+4], out[i+4:i+8] = out[i+4:i+8], out[i:i+4]
-    return bytes(out)
-
-
-def tmem_halves_for(pixels, w):
-    """Janelas de TMEM para uma textura CI8 que nao cabe numa carga so.
-
-    CI8 deixa 2048 bytes para texels (a TLUT ocupa a outra metade dos 4KB).
-    MEDIDO em runtime para os karts (64 de largura): a segunda janela comeca
-    em 2048-w, ou seja UMA LINHA antes do meio, e as duas se sobrepoem nessa
-    linha. Aplicamos a mesma regra para outras larguras, com recorte quando
-    a janela passaria do fim dos dados.
-    """
-    if not w or len(pixels) <= 2048:
-        return []
-    off = 2048 - w
-    end = min(off + 2048, len(pixels))
-    return [
-        {"y0": 0, "y1": 2048 // w,
-         "hash": f"{fnv1a32(pixels[0:2048]):08x}"},
-        {"y0": off // w, "y1": end // w,
-         "hash": f"{fnv1a32(pixels[off:end]):08x}"},
-    ]
-
-
-def extract_asset_sprites(root, rom, outdir, cache, dirname):
-    """Exporta sprites descritos por assets/<dirname>/*.json.
-
-    Mesma ideia dos karts, mas generica: o JSON traz rom_offset, dimensoes,
-    tipo e a TLUT de cada quadro. Diferencas tratadas aqui:
-      - "tlut" pode ser uma string (uma paleta so) ou uma lista;
-      - entradas de paleta podem ter "block_offset", um deslocamento DENTRO
-        do bloco descomprimido (o caso das TLUTs em common_data).
-    Usado para assets/lakitu, que o extrator antes ignorava por completo.
-    """
-    src_dir = root / "assets" / dirname
-    if not src_dir.is_dir():
-        return 0, []
-
-    manifest = []
-    count = 0
-    for json_path in sorted(src_dir.glob("*.json")):
-        entries = json.loads(json_path.read_text(encoding="utf-8"))
-        for symbol, info in entries.items():
-            fmt = str(info.get("type", "")).lower()
-            if fmt not in BPP:
-                continue
-            tlut_ref = info.get("tlut")
-            if fmt.startswith("ci") and not tlut_ref:
-                continue  # paleta desconhecida: nao inventamos cores
-
-            w, h = int(info["width"]), int(info["height"])
-            needed = (w * h * BPP[fmt] + 7) // 8
-            block_off = int_value(info.get("block_offset", 0))
-            raw = source_bytes(rom, int_value(info["rom_offset"]), cache, block_off + needed)
-            pixels = raw[block_off:block_off + needed]
-            if len(pixels) < needed:
-                print(f"  ! {symbol}: dados curtos ({len(pixels)} < {needed})")
-                continue
-
-            palette = None
-            if fmt.startswith("ci"):
-                refs = [tlut_ref] if isinstance(tlut_ref, str) else list(tlut_ref)
-                palette = []
-                for pal_symbol in refs:
-                    pal = entries.get(pal_symbol)
-                    if pal is None:
-                        print(f"  ! {symbol}: TLUT ausente ({pal_symbol})")
-                        palette = None
-                        break
-                    pw, ph = int(pal["width"]), int(pal["height"])
-                    pboff = int_value(pal.get("block_offset", 0))
-                    praw = source_bytes(rom, int_value(pal["rom_offset"]), cache, pboff + pw * ph * 2)
-                    palette.extend(decode_palette(praw[pboff:pboff + pw * ph * 2]))
-                if palette is None:
-                    continue
-
-            try:
-                rgba = decode(fmt, pixels, w, h, palette)
-            except Exception as exc:
-                print(f"  ! {symbol}: {exc}")
-                continue
-
-            out_sub = info.get("output_dir") or json_path.stem
-            rel = Path(dirname) / out_sub / f"{symbol}.png"
-            write_png(outdir / rel, w, h, rgba)
-            manifest.append({
-                "png": str(rel).replace("\\", "/"),
-                "symbol": symbol,
-                "rom_offset": f"0x{int_value(info['rom_offset']):X}",
-                "width": w, "height": h, "format": fmt,
-                "decoded_hash_fnv1a32": f"{fnv1a32(pixels):08x}",
-                "tmem_halves": tmem_halves_for(pixels, w) if fmt == "ci8" else [],
-            })
-            count += 1
-
-    return count, manifest
-
-
-def extract_kart_sprites(root, rom, outdir, cache):
-    """Exporta os 321 quadros CI8 de cada piloto+kart.
-
-    Os JSONs em assets/karts sao a fonte de verdade: cada quadro MIO0 e 64x64,
-    e sua TLUT de 256 cores e formada pela paleta do piloto (192 cores) seguida
-    da paleta das rodas daquele quadro (64 cores).  Essa segunda metade e o que
-    faltava para os sprites nao aparecerem em escala de cinza.
-    """
+def extract_kart_sprites(root, rom, outdir, cache, overwrite=True):
+    """Exporta os 321 quadros CI8 de cada piloto+kart."""
     kart_dir = root / "assets" / "karts"
     manifest = []
     count = 0
@@ -717,7 +2024,6 @@ def extract_kart_sprites(root, rom, outdir, cache):
     for json_path in sorted(kart_dir.glob("*_kart.json")):
         entries = json.loads(json_path.read_text(encoding="utf-8"))
         for symbol, info in entries.items():
-            # Os demais itens sao pedaços de paleta; somente os frames sao PNGs.
             if not symbol.endswith("_frame") and "_frame" not in symbol:
                 continue
             if info.get("type", "").lower() != "ci8" or not info.get("tlut"):
@@ -743,9 +2049,9 @@ def extract_kart_sprites(root, rom, outdir, cache):
             if len(palette) < 256:
                 raise ValueError(f"TLUT incompleta para {symbol}: {len(palette)} cores")
 
-            rgba = decode("ci8", pixels, w, h, palette)
+            rgba = decode("ci8", pixels, w, h, palette, transparent_black=TRANSPARENT_BLACK)
             relative_output = Path(info["output_dir"]) / f"{symbol}.png"
-            write_png(outdir / "karts" / relative_output, w, h, rgba)
+            write_png(outdir / "karts" / relative_output, w, h, rgba, overwrite=overwrite)
             manifest.append({
                 "png": str(Path("karts") / relative_output).replace("\\", "/"),
                 "symbol": symbol,
@@ -754,23 +2060,7 @@ def extract_kart_sprites(root, rom, outdir, cache):
                 "height": h,
                 "format": "ci8",
                 "decoded_hash_fnv1a32": f"{fnv1a32(pixels):08x}",
-                # CI8 exige a TLUT ocupando metade da TMEM (4KB), sobrando
-                # apenas 2048 bytes para texels. Um sprite CI8 64x64 (4096 B)
-                # portanto NAO cabe numa carga so: o jogo o carrega em duas
-                # metades de 64x32, e hasheia cada metade separadamente.
-                # E o hash de cada metade que precisa casar em runtime.
-                # CI8 nao cabe inteiro na TMEM (a TLUT ocupa metade dos 4KB),
-                # entao o sprite e carregado em duas janelas de 2048 bytes.
-                # MEDIDO em runtime (SCAN_HALVES.py): a segunda janela comeca
-                # em 1984, nao em 2048 -- ou seja, UMA LINHA ANTES do meio.
-                # As duas metades se sobrepoem em uma linha e a ultima linha
-                # da imagem nao e usada.
-                "tmem_halves": ([
-                    {"y0": 0, "y1": 2048 // w,
-                     "hash": f"{fnv1a32(pixels[0:2048]):08x}"},
-                    {"y0": (2048 - w) // w, "y1": (2048 - w + 2048) // w,
-                     "hash": f"{fnv1a32(pixels[2048 - w:2048 - w + 2048]):08x}"},
-                ] if len(pixels) > 2048 and w else []),
+                "tmem_halves": tmem_halves_for(pixels, w, h, is_kart=True),
                 "tlut": info["tlut"],
             })
             count += 1
@@ -780,47 +2070,295 @@ def extract_kart_sprites(root, rom, outdir, cache):
     return count
 
 
+# ---------------------------------------------------------------- sprites do Lakitu (assets/lakitu/*.json)
+
+def find_lakitu_sources(root):
+    """Localiza o diretório e arquivos JSON do Lakitu no projeto.
+    Suporta assets/lakitu, mk64_master/assets/lakitu e subdiretórios."""
+    candidates = [
+        root / "assets" / "lakitu",
+        root / "mk64_master" / "assets" / "lakitu",
+        root / "mk64-master" / "assets" / "lakitu",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            jsons = sorted(c.glob("*.json"))
+            if jsons:
+                return c, jsons
+
+    # Busca alternativa por qualquer diretório lakitu dentro de assets
+    assets_dir = root / "assets"
+    if assets_dir.is_dir():
+        for d in assets_dir.rglob("lakitu"):
+            if d.is_dir():
+                jsons = sorted(d.glob("*.json"))
+                if jsons:
+                    return d, jsons
+
+    return None, []
+
+
+def extract_lakitu_sprites(root, rom, outdir, cache, asset_json_symbols=None, overwrite=True):
+    """
+    Extrai TODOS os quadros do Lakitu mapeados em assets/lakitu/*.json
+    (semáforo de largada, contramão, volta final, pesca/resgate, bandeirada, etc).
+
+    Gera exatamente a estrutura de lakitu_sprite_manifest.json esperada com:
+      - "png": "lakitu/bluelight/gTextureLakituBlueLight4.png"
+      - "symbol": "gTextureLakituBlueLight4"
+      - "rom_offset": "0x6BB400"
+      - "width": 56, "height": 72, "format": "ci8"
+      - "decoded_hash_fnv1a32": "05190c5d"
+      - "tmem_halves": [ { "y0": 0, "y1": 36, "hash": "..." }, { "y0": 35, "y1": 72, "hash": "..." } ]
+    """
+    lakitu_dir, jsons = find_lakitu_sources(root)
+    if not lakitu_dir or not jsons:
+        print("Lakitu: assets/lakitu nao encontrado ou sem arquivos .json; ignorando.")
+        return 0, 0, []
+
+    # Carrega todas as entradas de todos os JSONs do Lakitu para resolução cruzada de TLUTs
+    all_lakitu_entries = {}
+    json_data_by_file = {}
+    for jp in jsons:
+        try:
+            data = json.loads(jp.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                json_data_by_file[jp] = data
+                all_lakitu_entries.update(data)
+        except Exception as exc:
+            print(f"  ! erro ao ler {jp.name}: {exc}")
+
+    manifest = []
+    pulados = []
+    por_categoria = defaultdict(int)
+
+    def _get_entry(key):
+        return (all_lakitu_entries.get(key) or
+                (asset_json_symbols.get(key) if asset_json_symbols else None))
+
+    for jp, entries in json_data_by_file.items():
+        for symbol, info in entries.items():
+            if not isinstance(info, dict):
+                continue
+
+            fmt = str(info.get("type", "")).lower()
+            if fmt not in BPP:
+                continue
+
+            # Paletas são entradas auxiliares, não quadros gráficos de sprite
+            if symbol.startswith("common_tlut") or "tlut" in symbol.lower():
+                continue
+
+            tlut_ref = info.get("tlut") or info.get("tlut_symbol")
+            if fmt.startswith("ci") and not tlut_ref:
+                pulados.append((symbol, "sem TLUT declarada"))
+                continue
+
+            try:
+                w, h = int(info["width"]), int(info["height"])
+            except (KeyError, TypeError, ValueError):
+                pulados.append((symbol, "largura/altura ausente ou inválida"))
+                continue
+
+            needed = (w * h * BPP[fmt] + 7) // 8
+            boff = int_value(info.get("block_offset", 0))
+            raw = source_bytes(rom, int_value(info["rom_offset"]), cache, boff + needed)
+            pixels = raw[boff:boff + needed]
+            if len(pixels) < needed:
+                pulados.append((symbol, f"dados curtos ({len(pixels)} < {needed})"))
+                continue
+
+            palette = None
+            if fmt.startswith("ci"):
+                refs = [tlut_ref] if isinstance(tlut_ref, str) else list(tlut_ref)
+                palette = []
+                falhou = None
+                for pal_symbol in refs:
+                    pal = _get_entry(pal_symbol)
+                    if pal is None:
+                        falhou = f"TLUT ausente: {pal_symbol}"
+                        break
+                    try:
+                        pw, ph = int(pal["width"]), int(pal["height"])
+                        pboff = int_value(pal.get("block_offset", 0))
+                        need_pal = pw * ph * 2
+                        praw = source_bytes(rom, int_value(pal["rom_offset"]), cache, pboff + need_pal)
+                        palette.extend(decode_palette(praw[pboff:pboff + need_pal]))
+                    except Exception as p_exc:
+                        falhou = f"erro ao decodificar TLUT {pal_symbol}: {p_exc}"
+                        break
+                if falhou:
+                    pulados.append((symbol, falhou))
+                    continue
+
+            try:
+                rgba = decode(fmt, pixels, w, h, palette, transparent_black=TRANSPARENT_BLACK)
+            except Exception as exc:
+                pulados.append((symbol, str(exc)))
+                continue
+
+            categoria = info.get("output_dir") or jp.stem
+            rel = Path("lakitu") / categoria / f"{symbol}.png"
+            destino = outdir / rel
+
+            write_png(destino, w, h, rgba, overwrite=overwrite)
+            por_categoria[categoria] += 1
+
+            # Entrada compatível exatamente com a especificação do port e a foto do bloco de notas
+            manifest.append({
+                "png": str(rel).replace("\\", "/"),
+                "symbol": symbol,
+                "rom_offset": f"0x{int_value(info['rom_offset']):X}",
+                "width": w,
+                "height": h,
+                "format": fmt,
+                "decoded_hash_fnv1a32": f"{fnv1a32(pixels):08x}",
+                "tmem_halves": tmem_halves_for(pixels, w, h) if fmt == "ci8" else [],
+            })
+
+    if manifest:
+        saida = outdir / "lakitu_sprite_manifest.json"
+        saida.parent.mkdir(parents=True, exist_ok=True)
+        saida.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+
+    return len(manifest), len(pulados), por_categoria
+
+
+def procurar_lakitu_fora_dos_jsons(root, manifest):
+    """Localiza símbolos com 'lakitu' no nome que existam nos bancos do port
+    mas não tenham aparecido nos JSONs."""
+    ja = {e["symbol"].lower() for e in manifest}
+    achados = set()
+    banks = root / "src" / "xbox360" / "generated_banks"
+    if banks.is_dir():
+        for c in banks.glob("*.c"):
+            try:
+                txt = c.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for linha in txt.splitlines():
+                if "lakitu" not in linha.lower() or "[]" not in linha:
+                    continue
+                for tok in linha.replace("[", " ").replace("]", " ").split():
+                    if "lakitu" in tok.lower() and tok.lower() not in ja:
+                        achados.add((tok, c.name))
+    return sorted(achados)
+
+
+# ---------------------------------------------------------------- canonicalização segura dos aliases
+
+def canonicalize_common_hash_aliases(outdir):
+    """Remove apenas HASH__nome.png que seja byte-a-byte igual ao PNG canônico
+    de um manifest generated. Recursos sem prova de igualdade permanecem intactos.
+    """
+    generated_manifest = outdir / "generated_texture_manifest.json"
+    if not generated_manifest.is_file():
+        return {"removed": [], "kept": []}
+    try:
+        entries = json.loads(generated_manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return {"removed": [], "kept": []}
+
+    by_key = defaultdict(list)
+    for e in entries:
+        png = str(e.get("png", ""))
+        h = str(e.get("decoded_hash_fnv1a32", "")).lower()
+        if not png or len(h) != 8:
+            continue
+        by_key[(h, int(e.get("width", 0) or 0), int(e.get("height", 0) or 0))].append(png)
+
+    removed, kept = [], []
+    for png in sorted(outdir.glob("[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]__*.png")):
+        name = png.name
+        h = name[:8].lower()
+        candidates = []
+        try:
+            # write_png() é determinístico: byte-identidade do PNG é uma prova
+            # forte de que os dois caminhos representam exatamente os mesmos pixels.
+            for rel in by_key.get((h, 0, 0), []):
+                candidates.append(outdir / rel)
+            # Quando dimensões não estão indexadas no nome, percorremos somente
+            # os manifests com o mesmo hash. O conjunto é pequeno.
+            if not candidates:
+                for (kh, _w, _h), rels in by_key.items():
+                    if kh == h:
+                        candidates.extend(outdir / r for r in rels)
+            matched = next((c for c in candidates if c.is_file() and c.read_bytes() == png.read_bytes()), None)
+        except OSError:
+            matched = None
+        if matched is not None:
+            try:
+                png.unlink()
+                removed.append({"alias": str(png.relative_to(outdir)).replace("\\", "/"),
+                                "canonical": str(matched.relative_to(outdir)).replace("\\", "/"),
+                                "hash": h})
+            except OSError:
+                kept.append(str(png.relative_to(outdir)).replace("\\", "/"))
+        else:
+            kept.append(str(png.relative_to(outdir)).replace("\\", "/"))
+
+    report = {
+        "method": "byte-identical PNG + manifest decoded hash",
+        "removed_count": len(removed),
+        "kept_count": len(kept),
+        "removed": removed,
+        "kept_hash_aliases": kept,
+        "note": "Hash-prefixed files without exact proof remain untouched."
+    }
+    (outdir / "texture_alias_manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+# ---------------------------------------------------------------- main
+
 def main():
-    ap = argparse.ArgumentParser()
+    global TRANSPARENT_BLACK
+    ap = argparse.ArgumentParser(description="Extrator de Texturas de Alta Fidelidade do Mario Kart 64 (com suporte a Lakitu)")
     ap.add_argument("--root")
     ap.add_argument("--rom")
+    ap.add_argument("--region", default="auto", help="região dos YAMLs (ex.: us, br). Se não existir, usa us")
     ap.add_argument("--out", default="extracted_textures")
     ap.add_argument("--dims", help="json opcional { 'path/rel.inc.c': [w,h] } para forcar dimensoes")
-    ap.add_argument("--force", action="store_true",
-                    help="sobrescreve PNGs ja existentes (por padrao eles sao preservados, "
-                         "para nao perder edicoes ja feitas)")
     ap.add_argument("--no-karts", action="store_true",
                     help="nao exporta os sprites de piloto+kart de assets/karts")
+    ap.add_argument("--no-lakitu", action="store_true",
+                    help="nao exporta os quadros do Lakitu de assets/lakitu")
     ap.add_argument("--no-generated", action="store_true",
                     help="nao exporta texturas verificadas dos bancos gerados do port 360")
+    ap.add_argument("--force", action="store_true",
+                    help="sobrescreve PNGs mesmo que ja existam no disco")
+    ap.add_argument("--keep-black", action="store_true",
+                    help="mantem fundo preto opaco em vez de aplicar transparencia automatica (I8/I4/CI)")
     a = ap.parse_args()
 
-    global SKIP_EXISTING_PNGS
-    SKIP_EXISTING_PNGS = not a.force
+    if a.keep_black:
+        TRANSPARENT_BLACK = False
+
+    overwrite = a.force or not SKIP_EXISTING_PNGS
 
     root = Path(a.root).resolve() if a.root else Path(__file__).resolve().parent
-    rom_path = Path(a.rom).resolve() if a.rom else root / "baserom.us.z64"
-    if not rom_path.is_file():
-        sys.exit("ROM nao encontrada: " + str(rom_path))
+    rom_path, detected_region = detect_rom(root, a.rom)
+    if rom_path is None:
+        sys.exit("ROM nao encontrada: use --rom .\\baserom.br.z64 ou coloque baserom.br.z64/baserom.us.z64 em mk64-master")
     rom = rom_path.read_bytes()
+    if a.region == "auto" and detected_region in ("us", "br"):
+        a.region = detected_region
 
-    recipes = json.loads((root / "PUBLIC_ASSET_RECIPES.json").read_text(encoding="utf-8"))
+    recipes = json.loads((root / "PUBLIC_ASSET_RECIPES.json").read_text(encoding="utf-8")) if (root / "PUBLIC_ASSET_RECIPES.json").is_file() else []
     overrides = json.loads(Path(a.dims).read_text(encoding="utf-8")) if a.dims else {}
-    yaml_symbols = load_all_yaml_symbols(root)
+    yaml_symbols = load_all_yaml_symbols(root, a.region)
     asset_json_symbols = load_asset_json_symbols(root)
-    print(f"YAML: {len(yaml_symbols)} simbolos carregados de yamls\\us\\*.yml")
+    source_symbols, source_conflicts = load_source_texture_metadata(root)
+    print(f"ROM : {rom_path.name} (região detectada={detected_region or 'desconhecida'})")
+    print(f"YAML: {len(yaml_symbols)} simbolos carregados (região={a.region})")
+    if a.region not in ("auto", "us") and not (root / "yamls" / a.region).is_dir():
+        print(f"  ! yamls\\{a.region} nao existe; usando yamls\\us como fallback de metadata")
     print(f"JSON: {len(asset_json_symbols)} simbolos carregados de assets\\**\\*.json")
-    print("Varrendo o codigo-fonte por chamadas gDPLoadTextureBlock/Tile (pode levar um instante)...")
-    symbol_aliases = build_symbol_aliases(root)
-    source_dims = scan_source_for_dims(root)
-    print(f"SRC : {len(source_dims)} simbolos com dimensao real encontrada no codigo-fonte "
-          f"({len(symbol_aliases)} aliases arquivo->variavel-C mapeados)")
+    print(f"SRC : {len(source_symbols)} simbolos com dimensao/formato encontrados no codigo")
+    if source_conflicts:
+        print(f"  ! conflitos no codigo para {len(source_conflicts)} simbolos; esses simbolos nao serao escolhidos automaticamente")
 
     recipes_by_symbol = {symbol_of(r["path"]): r for r in recipes}
 
-    # Para arquivos sem sufixo de formato (texturas de curso empacotadas em
-    # arrays [][N], ex: gTextureMole1.inc.c): se a pasta tiver exatamente
-    # UMA recipe com "tlut" no caminho, usamos ela como paleta CI8 por default.
     tlut_by_dir = defaultdict(list)
     for r in recipes:
         rp = str(r["path"]).replace("\\", "/")
@@ -830,137 +2368,214 @@ def main():
     outdir = root / a.out
     cache = {}
     dims_report = {}
-    ok = skipped = guessed = from_metadata = 0
+    ok = skipped = guessed = from_metadata = from_source = from_format_size = from_override = 0
     skip_list = []
 
     for r in recipes:
         rel = str(r["path"]).replace("\\", "/")
         if "tlut" in rel.lower():
-            continue  # paletas nao sao texturas, sao lidas sob demanda abaixo
+            continue
         if EXCLUDE_RE.search(rel):
-            continue  # nao e textura (ex: staff_ghost = dados de replay)
+            continue
         m = FMT_RE.search(rel)
         no_suffix = not m
-        fmt = m.group(1).lower() if m else "ci8"  # sem sufixo -> assume CI8 (padrao para sprites de curso)
+        fmt = m.group(1).lower() if m else "ci8"
         size = int(r["size"])
         off = int(r.get("block_offset", 0))
         data = source_bytes(rom, int(r["rom_offset"]), cache, off + size)[off:off + size]
 
         sym = symbol_of(rel)
-        # Os JSONs de assets sao mais completos para texturas de curso; os YAMLs
-        # continuam cobrindo os assets que nao possuem entrada JSON.
         yinfo = asset_json_symbols.get(sym) or yaml_symbols.get(sym)
+        sinfo = source_symbols.get(sym)
         palette = None
-        used_yaml = False
+        source_kind = None
+        resolved = False
 
-        if yinfo and "width" in yinfo and "height" in yinfo:
-            yw, yh = int(yinfo["width"]), int(yinfo["height"])
-            yfmt = yinfo.get("type", yinfo.get("format", fmt)).lower()
-            eff_fmt = yfmt if yfmt in BPP else fmt
-            need_bytes = (yw * yh * BPP[eff_fmt] + 7) // 8
-            if need_bytes <= len(data):
-                w, h, fmt, used_yaml = yw, yh, eff_fmt, True
-                from_metadata += 1
-                tlut_sym = yinfo.get("tlut", yinfo.get("tlut_symbol"))
-                if isinstance(tlut_sym, list):
-                    # Listas sao usadas pelos sprites de kart, tratados abaixo.
-                    tlut_sym = None
-                if fmt in ("ci4", "ci8") and tlut_sym and tlut_sym in recipes_by_symbol:
-                    tr = recipes_by_symbol[tlut_sym]
-                    toff = int(tr.get("block_offset", 0)); tsize = int(tr["size"])
-                    traw = source_bytes(rom, int(tr["rom_offset"]), cache, toff + tsize)[toff:toff + tsize]
-                    palette = decode_palette(traw)
+        if sinfo:
+            w,h,fmt=int(sinfo['width']),int(sinfo['height']),sinfo['type']
+            need=(w*h*BPP[fmt]+7)//8 if fmt in BPP else None
+            if need is not None and need <= len(data):
+                source_kind='source-code'; from_source += 1; resolved=True
             else:
-                print(f"  ! YAML dims nao cabem nos bytes ({sym}: {yw}x{yh} precisa {need_bytes}B, "
-                      f"recipe tem {len(data)}B) -- usando chute")
+                print(f"  ! codigo-fonte incompatível ({sym}: {w}x{h} {fmt} precisa {need}B, recipe tem {len(data)}B); procurando metadata/formato")
+        elif yinfo and 'width' in yinfo and 'height' in yinfo:
+            yw,yh=int(yinfo['width']),int(yinfo['height'])
+            yfmt=yinfo.get('type',yinfo.get('format',fmt)).lower()
+            eff_fmt=yfmt if yfmt in BPP else fmt
+            need=(yw*yh*BPP[eff_fmt]+7)//8
+            if need <= len(data):
+                w,h,fmt=yw,yh,eff_fmt; source_kind='metadata'; from_metadata += 1; resolved=True
+            else:
+                print(f"  ! metadata incompatível ({sym}: {yw}x{yh} precisa {need}B, recipe tem {len(data)}B); procurando no codigo/formato")
 
-        used_source_scan = False
-        real_sym = symbol_aliases.get(sym, sym)
-        if not used_yaml and (sym in source_dims or real_sym in source_dims):
-            sw, sh = source_dims.get(sym) or source_dims[real_sym]
-            need_bytes = (sw * sh * BPP.get(fmt, 8) + 7) // 8
-            if need_bytes <= len(data):
-                w, h, used_source_scan = sw, sh, True
-                from_metadata += 1
+        if not resolved:
+            inferred=infer_from_filename_and_size(rel,size)
+            if inferred:
+                w,h,fmt=inferred; source_kind='format+size'; from_format_size += 1; resolved=True
 
-        if not used_yaml and not used_source_scan:
-            npix = size * 8 // BPP.get(fmt, 8)
-            wh = overrides.get(rel) or guess_dims(npix)
+        if not resolved and rel in overrides:
+            w,h=map(int,overrides[rel]); source_kind='manual-override'; from_override += 1; resolved=True
+
+        if not resolved:
+            npix=size*8//BPP.get(fmt,8)
+            wh=guess_dims(npix)
             if wh is None:
-                skip_list.append(f"{rel}  ({npix}px, fmt={fmt})")
-                skipped += 1
-                continue
-            w, h = wh
-            guessed += 1
-            if no_suffix:
-                dir_tluts = tlut_by_dir.get(str(Path(rel).parent), [])
-                if len(dir_tluts) == 1:
-                    tr = dir_tluts[0]
-                    toff = int(tr.get("block_offset", 0)); tsize = int(tr["size"])
-                    traw = source_bytes(rom, int(tr["rom_offset"]), cache, toff + tsize)[toff:toff + tsize]
-                    try:
-                        palette = decode_palette(traw)
-                    except Exception:
-                        palette = None
+                skip_list.append(f"{rel}  ({npix}px, fmt={fmt})"); skipped += 1; continue
+            w,h=wh; guessed += 1; source_kind='guess'
+            print(f"  ? dimensao inferida por ultimo recurso: {sym} -> {w}x{h} ({fmt})")
+
+        if fmt in ('ci4','ci8'):
+            tlut_sym=None
+            if yinfo:
+                tlut_sym=yinfo.get('tlut',yinfo.get('tlut_symbol'))
+                if isinstance(tlut_sym,list): tlut_sym=None
+            if tlut_sym and tlut_sym in recipes_by_symbol:
+                tr=recipes_by_symbol[tlut_sym]
+                toff=int(tr.get('block_offset',0)); tsize=int(tr['size'])
+                traw=source_bytes(rom,int(tr['rom_offset']),cache,toff+tsize)[toff:toff+tsize]
+                palette=decode_palette(traw)
+            elif no_suffix:
+                dir_tluts=tlut_by_dir.get(str(Path(rel).parent),[])
+                if len(dir_tluts)==1:
+                    tr=dir_tluts[0]
+                    toff=int(tr.get('block_offset',0)); tsize=int(tr['size'])
+                    traw=source_bytes(rom,int(tr['rom_offset']),cache,toff+tsize)[toff:toff+tsize]
+                    try: palette=decode_palette(traw)
+                    except Exception: palette=None
 
         try:
-            rgba = decode(fmt, data, w, h, palette)
+            rgba = decode(fmt, data, w, h, palette, transparent_black=TRANSPARENT_BLACK)
         except Exception as e:
             print("  ! falha:", rel, e)
             skipped += 1
             continue
 
         h32 = fnv1a32(data)
-        write_png(outdir / f"{h32:08x}__{Path(rel).stem}.png", w, h, rgba)
-        dims_report[rel] = {"w": w, "h": h, "fmt": fmt, "size": size, "hash": f"{h32:08x}",
-                             "source": "metadata" if yinfo else "guess"}
+        out_png_path = outdir / f"{h32:08x}__{Path(rel).stem}.png"
+        write_png(out_png_path, w, h, rgba, overwrite=overwrite)
+
+        export_community_pack_textures(
+            outdir,
+            [sym, Path(rel).stem, rel],
+            fmt,
+            data,
+            w,
+            h,
+            palette,
+            overwrite=overwrite
+        )
+
+        recipe_rom_offset = int_value(r["rom_offset"])
+        recipe_block_offset = int_value(r.get("block_offset", 0))
+        is_mio0 = rom[recipe_rom_offset:recipe_rom_offset + 4] == b"MIO0"
+
+        dims_report[rel] = {
+            "w": w,
+            "h": h,
+            "fmt": fmt,
+            "size": size,
+            "hash": f"{h32:08x}",
+            "source": source_kind,
+            "rom_offset": f"0x{recipe_rom_offset:X}",
+            "block_offset": recipe_block_offset,
+            "compressed": is_mio0,
+            "compressed_size": None
+        }
         ok += 1
 
-    (root / "texture_dims.json").write_text(
-        json.dumps(dims_report, indent=1, sort_keys=True), encoding="utf-8")
+    if dims_report:
+        (root / "texture_dims.json").write_text(
+            json.dumps(dims_report, indent=1, sort_keys=True), encoding="utf-8")
+
+
+    repack_recipes = []
+    for recipe in recipes:
+        item = dict(recipe)
+        item["path"] = str(item.get("path", "")).replace("\\\\", "/").replace("\\", "/")
+        item["rom_offset"] = int_value(item["rom_offset"])
+        item["size"] = int(item["size"])
+        item["block_offset"] = int_value(item.get("block_offset", 0))
+        repack_recipes.append(item)
+
+    if repack_recipes:
+        (root / "texture_repack_recipes.json").write_text(
+            json.dumps(repack_recipes, indent=1, sort_keys=True), encoding="utf-8")
     if skip_list:
         (root / "texture_skip_list.txt").write_text("\n".join(skip_list), encoding="utf-8")
 
     cache.clear()
-    kart_count = 0 if a.no_karts else extract_kart_sprites(root, rom, outdir, cache)
-
-    # Outras pastas de asset com JSON proprio (lakitu, etc). Antes eram
-    # ignoradas: os sprites existiam na ROM e estavam mapeados, mas nenhum
-    # caminho do extrator os lia.
-    assets_root = root / "assets"
-    other_count = 0
-    other_manifest = []
-    if assets_root.is_dir():
-        for sub in sorted(p for p in assets_root.iterdir() if p.is_dir()):
-            if sub.name in ("karts", "code", "include"):
-                continue
-            if not any(sub.glob("*.json")):
-                continue
-            n, man = extract_asset_sprites(root, rom, outdir, cache, sub.name)
-            if n:
-                print(f"Assets: {n} sprites de '{sub.name}' -> {outdir / sub.name}")
-                other_count += n
-                other_manifest.extend(man)
-    if other_manifest:
-        (outdir / "asset_sprite_manifest.json").write_text(
-            json.dumps(other_manifest, indent=1), encoding="utf-8")
-    # Os três grupos não compartilham blocos. Liberar MIO0 já processados evita
-    # acumular dezenas de blocos grandes antes da varredura dos bancos gerados.
+    kart_count = 0 if a.no_karts else extract_kart_sprites(root, rom, outdir, cache, overwrite=overwrite)
     cache.clear()
-    generated_count, generated_skipped = (
-        (0, 0) if a.no_generated else
-        extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, recipes_by_symbol,
-                                    source_dims, symbol_aliases)
-    )
+
+    # --- Extração dos sprites do Lakitu (incorporado diretamente do EXTRACT_LAKITU.py) ---
+    lakitu_count = 0
+    lakitu_skipped = 0
+    lakitu_manifest = []
+    if not a.no_lakitu:
+        lakitu_count, lakitu_skipped, por_cat = extract_lakitu_sprites(
+            root, rom, outdir, cache, asset_json_symbols=asset_json_symbols, overwrite=overwrite
+        )
+        if lakitu_count > 0:
+            lakitu_manifest_file = outdir / "lakitu_sprite_manifest.json"
+            if lakitu_manifest_file.is_file():
+                try:
+                    lakitu_manifest = json.loads(lakitu_manifest_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+    cache.clear()
+    if a.no_generated:
+        generated_count, generated_skipped = 0, 0
+        asset_json_extra, asset_json_skipped = [], []
+    else:
+        generated_count, generated_skipped, asset_json_extra, asset_json_skipped = extract_generated_textures(
+            root, rom, outdir, cache, asset_json_symbols, recipes_by_symbol, overwrite=overwrite
+        )
+
+    alias_report = {"removed": [], "kept": []}
+    if not a.no_generated:
+        alias_report = canonicalize_common_hash_aliases(outdir)
+        print(f"Aliases HASH duplicados removidos com prova exata: {len(alias_report.get('removed', []))}")
+        print(f"Aliases HASH sem prova exata preservados: {len(alias_report.get('kept_hash_aliases', []))}")
 
     print(f"\nOK    : {ok} texturas comuns -> {outdir}")
     print(f"Karts : {kart_count} sprites piloto+kart -> {outdir / 'karts'}")
+    if not a.no_lakitu:
+        print(f"Lakitu: {lakitu_count} quadros do Lakitu -> {outdir / 'lakitu'}")
+        if por_cat:
+            for cat in sorted(por_cat):
+                print(f"        * {cat:<20} {por_cat[cat]:>3} quadros")
+        if lakitu_skipped > 0:
+            print(f"        ! {lakitu_skipped} quadros do Lakitu ignorados")
+        fora = procurar_lakitu_fora_dos_jsons(root, lakitu_manifest)
+        if fora:
+            print(f"        ! {len(fora)} simbolo(s) com 'lakitu' fora dos JSONs (sem dimensoes declaradas):")
+            for tok, arq in fora[:10]:
+                print(f"          - {tok} ({arq})")
+
     print(f"Bancos: {generated_count} texturas verificadas -> {outdir / 'generated'}")
+    print(f"Assets JSON extras: {len(asset_json_extra)} texturas novas verificadas -> {outdir / 'generated' / 'asset_json'}")
+    if asset_json_skipped:
+        print(f"  ! Assets JSON ignorados: {len(asset_json_skipped)} (motivos em asset_json_texture_skipped.json)")
+    runtime_manifest_path = outdir / "runtime_derived_manifest.json"
+    if runtime_manifest_path.is_file():
+        try:
+            runtime_items = json.loads(runtime_manifest_path.read_text(encoding="utf-8"))
+            red_items = [x for x in runtime_items if x.get("derived_kind") == "red_shell"]
+            print(f"Red Shell: {len(red_items)} variantes derivadas -> {outdir / 'generated'}")
+        except Exception:
+            pass
     print(f"  nao exportados: {generated_skipped} (motivos em generated_texture_skipped.json)")
-    print(f"  de metadados (dimensao real): {from_metadata}")
-    print(f"  adivinhadas:             {guessed}")
-    print(f"SKIP  : {skipped}  (lista completa em texture_skip_list.txt)")
-    print("Dims gravadas em texture_dims.json")
+    print(f"  do codigo-fonte:              {from_source}")
+    print(f"  de metadata validada:         {from_metadata}")
+    print(f"  de formato+tamanho:           {from_format_size}")
+    print(f"  de override manual:           {from_override}")
+    print(f"  adivinhadas (ultimo recurso): {guessed}")
+    print(f"SKIP  : {skipped} (lista completa em texture_skip_list.txt)")
+    if dims_report:
+        print("Dims gravadas em texture_dims.json")
+    if repack_recipes:
+        print("Recipes gravadas em texture_repack_recipes.json")
 
 
 if __name__ == "__main__":

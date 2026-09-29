@@ -1470,6 +1470,27 @@ static void import_texture(int tile) {
        node->width/height NAO sao tocados aqui. */
     {
         uint32_t hd_hash = x360_texture_hash(source, source_size);
+        uint32_t hd_logical_hash = 0;
+        uint32_t hd_logical_rows = 0;
+        /* G_LOADTILE usa lrt inclusivo. Em algumas texturas do menu (nomes,
+           titulos etc.) isso faz o renderer capturar uma linha extra: o
+           conteudo usado pelo extrator/PAK corresponde a N linhas, enquanto
+           source_size contem N+1. Nao alteramos a carga real; apenas
+           calculamos um segundo hash sem a linha extra como fallback. */
+        if (rows > 1 && (*gfx_loaded_texture(tile)).row_bytes &&
+            source_size == (*gfx_loaded_texture(tile)).row_bytes * rows) {
+            const uint32_t requested_rows =
+                (rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].lrt >=
+                 rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].ult)
+                    ? ((rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].lrt -
+                        rdp.tiles[(*gfx_loaded_texture(tile)).load_tile & 7].ult) >> 2)
+                    : 0;
+            if (requested_rows > 0 && requested_rows < rows) {
+                hd_logical_rows = requested_rows;
+                hd_logical_hash = x360_texture_hash(
+                    source, (*gfx_loaded_texture(tile)).row_bytes * hd_logical_rows);
+            }
+        }
         /* NAO sobrescrever node->content_hash aqui: e o campo que
            gfx_texture_cache_lookup usa para reconhecer a textura. Para cargas
            em blocos (LOADTILE, ex: retratos do menu) ele deve ficar 0; com o
@@ -1487,7 +1508,66 @@ static void import_texture(int tile) {
             return;
         }
         bool hd_found = x360_try_load_hd_texture(hd_hash);
-        node->x360_hd_loaded = hd_found ? hd_hash : 0;
+        uint32_t hd_used_hash = hd_hash;
+        if (!hd_found && hd_logical_hash) {
+            hd_found = x360_try_load_hd_texture(hd_logical_hash);
+            if (hd_found) hd_used_hash = hd_logical_hash;
+        }
+
+        /* TKMK00 texture_ok e carregada em dois G_LOADTILEs horizontais.
+           O tex.pak guarda o OK completo como 31x19 -> 62x38 HD, enquanto
+           cada G_LOADTILE produz um hash somente da metade.
+
+           Nao carregamos o 62x38 inteiro para cada metade: isso quebraria
+           a amostragem porque node->width/height continuam representando
+           o bloco N64. Quando os hashes das duas metades nao existem no PAK,
+           usamos DFF91B13 como fonte e recortamos a metade correspondente.
+           O trace mostrou os blocos N64 em x=0 e x=15; em HD isso corresponde
+           a x=0 e x=30, com 32 pixels de largura para cada bloco. */
+        if (!hd_found && (hd_hash == 0x35d069ffu || hd_hash == 0x154196f3u)) {
+            const uint32_t ok_full_hash = 0xdff91b13u;
+            int ok_slot = x360_hdram_find(ok_full_hash);
+            const uint8_t *ok_pixels = NULL;
+            uint32_t ok_w = 0, ok_h = 0;
+
+            if (ok_slot >= 0) {
+                x360_hdram[ok_slot].last_used = ++x360_hdram_clock;
+                ok_pixels = x360_hdram[ok_slot].data;
+                ok_w = x360_hdram[ok_slot].w;
+                ok_h = x360_hdram[ok_slot].h;
+            } else {
+                uint32_t pw = 0, ph = 0;
+                if (x360_pak_read(ok_full_hash, &pw, &ph)) {
+                    x360_hdram_store(ok_full_hash, pw, ph, x360_hd_buf, pw * ph * 4);
+                    ok_slot = x360_hdram_find(ok_full_hash);
+                    if (ok_slot >= 0) {
+                        x360_hdram[ok_slot].last_used = ++x360_hdram_clock;
+                        ok_pixels = x360_hdram[ok_slot].data;
+                        ok_w = x360_hdram[ok_slot].w;
+                        ok_h = x360_hdram[ok_slot].h;
+                    }
+                }
+            }
+
+            if (ok_pixels && ok_w == 62u && ok_h == 38u) {
+                const uint32_t crop_x = (hd_hash == 0x35d069ffu) ? 0u : 30u;
+                const uint32_t crop_w = 32u;
+                const uint32_t crop_h = 38u;
+                uint8_t *ok_crop = tile_data;
+
+                for (uint32_t y = 0; y < crop_h; ++y) {
+                    memcpy(ok_crop + y * crop_w * 4,
+                           ok_pixels + (y * ok_w + crop_x) * 4,
+                           crop_w * 4);
+                }
+
+                gfx_rapi->upload_texture(ok_crop, crop_w, crop_h);
+                hd_found = true;
+                hd_used_hash = hd_hash;
+            }
+        }
+
+        node->x360_hd_loaded = hd_found ? hd_used_hash : 0;
 
         /* Trace de diagnostico (desligado). Para reativar, troque o 0 por 1
            abaixo: grava em game:\hdtex-trace.log o hash calculado em runtime
@@ -1519,7 +1599,7 @@ static void import_texture(int tile) {
                    qual regiao da imagem o jogo esta hasheando, comparando com
                    o que o extrator ve no PC (ver KART_DEBUG.py). */
                 _snprintf(msg, sizeof(msg) - 1,
-                    "MK64: KART_TRACE fmt=%u siz=%u w=%u h=%u srcsz=%u hash=%08x found=%u m=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X pitch=%u lx=%u ly=%u tw=%u\n",
+                    "MK64: TKMK_TILE_TRACE fmt=%u siz=%u w=%u h=%u srcsz=%u hash=%08x found=%u m=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X pitch=%u lx=%u ly=%u tw=%u\n",
                     (unsigned)fmt, (unsigned)siz, node->width, node->height, (unsigned)source_size,
                     hd_hash, hd_found ? 1u : 0u,
                     /* amostra do MEIO do bloco: o inicio do sprite e
@@ -2973,7 +3053,7 @@ static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
    Sem isto a funcao reabria o arquivo do disco e reenviava a textura para a
    GPU a CADA QUADRO de CADA imagem de menu -- causa direta dos engasgos nos
    menus de selecao. */
-#define X360_HDMENU_MAX 64
+#define X360_HDMENU_MAX 512
 static uint32_t x360_hdmenu_hash[X360_HDMENU_MAX];
 static uint32_t x360_hdmenu_texid[X360_HDMENU_MAX];
 static uint32_t x360_hdmenu_w[X360_HDMENU_MAX];
@@ -2987,6 +3067,80 @@ static int x360_hdmenu_find(uint32_t hash) {
     return -1;
 }
 
+/* TKMK00 tile-mode bridge: the original menu code loads these images in
+   TMEM bands. Keep the proven menu renderer untouched for TKMK00 so the
+   normal texture pipeline can resolve each band from tex.pak by its original hash. */
+static bool x360_is_tkmk00_full_hash(uint32_t hash) {
+    switch (hash) {
+        case 0x55a88dcau:
+        case 0x151886fbu:
+        case 0x59a45e1bu:
+        case 0x916164e7u:
+        case 0xcd2d2e87u:
+        case 0x830c0246u:
+        case 0x3e97679au:
+        case 0x5e434358u:
+        case 0x111abc49u:
+        case 0xf4a27dedu:
+        case 0x9fcdea9du:
+        case 0x7104183au:
+        case 0x3762a661u:
+        case 0x41d314b4u:
+        case 0xa51bf048u:
+        case 0x307a3c33u:
+        case 0x7e4e34f7u:
+        case 0x2b187347u:
+        case 0xa74f0fc1u:
+        case 0x6dc8dfd1u:
+        case 0x13f49498u:
+        case 0xe0806470u:
+        case 0x5217cf79u:
+        case 0xf88adb50u:
+        case 0xd1a7e1cdu:
+        case 0xdca32287u:
+        case 0xf1db2348u:
+        case 0x37014dc3u:
+        case 0x5fa1fa92u:
+        case 0x9b2de0e5u:
+        case 0xc9c80027u:
+        case 0x88635819u:
+        case 0x7fd56f8eu:
+        case 0xb1ac6d62u:
+        case 0xc08c182eu:
+        case 0x5544cbbau:
+        case 0x79fcbc0fu:
+        case 0xd1eda2e8u:
+        case 0x9b105ea5u:
+        case 0xe700a09du:
+        case 0xb9cc6440u:
+        case 0xa9a455efu:
+        case 0x6d9b6735u:
+        case 0xe011eed4u:
+        case 0xa5b3f189u:
+        case 0x9d556ae0u:
+        case 0x8eb95a8cu:
+        case 0xbc096deau:
+        case 0x87b03a70u:
+        case 0xf4fffd39u:
+        case 0xb2d74335u:
+        case 0xe40a7d4au:
+        case 0x5317a1a8u:
+        case 0x02453e44u:
+        case 0xecaffb70u:
+        case 0xdff91b13u:
+        case 0xa5e96f2cu:
+        case 0x6e5b02e9u:
+        case 0x67f0069du:
+        case 0x8991dad6u:
+        case 0xaf1ef0cbu:
+        case 0xb329eb0bu:
+        case 0x9c2106c8u:
+            return true;
+        default:
+            return false;
+    }
+}
+
 extern "C" int x360_try_draw_hd_menu_quad(const uint8_t *fullImageSource, uint32_t texDeclaredW,
                                            uint32_t texDeclaredH, int32_t dstX, int32_t dstY,
                                            int32_t dstW, int32_t dstH) {
@@ -2995,6 +3149,10 @@ extern "C" int x360_try_draw_hd_menu_quad(const uint8_t *fullImageSource, uint32
     /* RGBA16 e o formato fixo usado por render_menu_textures. */
     uint32_t source_size = texDeclaredW * texDeclaredH * 2;
     uint32_t hash = x360_texture_hash(fullImageSource, source_size);
+
+    /* TKMK00 is deliberately left to the original func_80095E10() TMEM
+       path. Its individual tile hashes are supplied by tex.pak. */
+    if (x360_is_tkmk00_full_hash(hash)) return 0;
 
     int slot = x360_hdmenu_find(hash);
     if (slot < 0) {

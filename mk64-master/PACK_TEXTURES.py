@@ -27,7 +27,7 @@ Para empacotar so um subconjunto, use --only com um prefixo de caminho:
     py .\PACK_TEXTURES.py --only generated\course_player_selection
 """
 from pathlib import Path
-import argparse, json, re, struct, sys
+import argparse, hashlib, json, re, struct, sys
 
 try:
     from PIL import Image
@@ -50,27 +50,41 @@ def load_manifest(path):
 
 
 PAK_ENTRIES = []   # usado no modo --pak: (hash_hex, w, h, bytes)
+_HASH_RECORDS = {}
+_HASH_DEDUP_COUNT = 0
+_HASH_COLLISIONS = []
 
 
-def write_tex(outdir, hash_hex, img):
+def write_tex(outdir, hash_hex, img, source=""):
+    global _HASH_DEDUP_COUNT
     w, h = img.size
-    if PAK_MODE:
-        PAK_ENTRIES.append((hash_hex, w, h, img.tobytes()))
+    hh = str(hash_hex).lower()
+    raw = img.tobytes()
+    prev = _HASH_RECORDS.get(hh)
+    if prev is not None:
+        pw, ph, praw, psource = prev
+        if pw == w and ph == h and praw == raw:
+            _HASH_DEDUP_COUNT += 1
+            return None
+        _HASH_COLLISIONS.append({
+            "hash": hh,
+            "existing": {"width": pw, "height": ph, "source": psource,
+                         "sha256": hashlib.sha256(praw).hexdigest()},
+            "incoming": {"width": w, "height": h, "source": source,
+                         "sha256": hashlib.sha256(raw).hexdigest()},
+        })
+        print(f"  ! COLISAO FNV32 {hh}: mantendo a primeira textura; ignorando a segunda: {source}")
         return None
-    # Subpasta pelos 2 primeiros digitos do hash: o FATX do Xbox 360 nao aceita
-    # mais de 4096 entradas por pasta, e o elenco completo de karts passa disso
-    # (a copia falha silenciosamente nos ultimos arquivos). Com 256 subpastas
-    # sobram ~20 arquivos em cada.
-    sub = outdir / hash_hex[:2]
+    _HASH_RECORDS[hh] = (w, h, raw, source)
+    if PAK_MODE:
+        PAK_ENTRIES.append((hh, w, h, raw))
+        return None
+    sub = outdir / hh[:2]
     sub.mkdir(parents=True, exist_ok=True)
-    out_path = sub / f"{hash_hex}.tex"
+    out_path = sub / f"{hh}.tex"
     with open(out_path, "wb") as f:
-        # Xbox 360 e big-endian (PowerPC); o C le os bytes crus sem conversao,
-        # entao o header precisa estar em big-endian tambem, senao magic/w/h
-        # chegam com os bytes invertidos e sao rejeitados (mesmo com o hash
-        # do nome do arquivo batendo certinho com o hash calculado em runtime).
         f.write(struct.pack(">III", MAGIC, w, h))
-        f.write(img.tobytes())
+        f.write(raw)
     return out_path
 
 
@@ -132,6 +146,21 @@ def aplicar_geometria(geo_path, generated):
     return feitos
 
 
+def _diagnose_yoshi(indir, generated):
+    for rel in ("generated/course_player_selection/gTextureYoshiFace08.png",
+                "generated/course_player_selection/gTextureYoshiFace09.png"):
+        print("\n" + rel)
+        e = generated.get(rel.lower())
+        if not e:
+            print("  manifest: NAO ENCONTRADO")
+            continue
+        print("  symbol:", e.get("symbol"))
+        print("  decoded_hash_fnv1a32:", e.get("decoded_hash_fnv1a32"))
+        print("  tmem_halves:", len(e.get("tmem_halves") or []))
+        for i, t in enumerate(e.get("tmem_halves") or []):
+            print(f"    [{i}] ({t.get('x0',0)},{t.get('y0',0)})-({t.get('x1',e.get('width'))},{t.get('y1')}) hash={t.get('hash')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="indir", default="extracted_textures")
@@ -146,6 +175,8 @@ def main():
                     help="modo ANTIGO: fatia imagens grandes de menu em varios .tex (um por faixa "
                          "de TMEM). So necessario se o patch de menu_items.c (x360_try_draw_hd_menu_quad) "
                          "NAO estiver aplicado. Com o patch, o padrao (imagem inteira) e o correto.")
+    ap.add_argument("--diagnose-yoshi", action="store_true",
+                    help="mostra hashes/tiles de Yoshi sem gerar o PAK")
     a = ap.parse_args()
 
     indir = Path(a.indir)
@@ -156,10 +187,55 @@ def main():
     only_prefix = a.only.replace("\\", "/").lower() if a.only else None
 
     # --- indices dos manifests, por caminho de PNG relativo -------------
+    # IMPORTANTE: manter os manifests separados para preservar o diagnostico
+    # e a contagem original. Eles continuam sendo empacotados juntos no
+    # mesmo tex.pak; apenas nao sao artificialmente fundidos nos contadores.
     generated = {e["png"].replace("\\", "/").lower(): e
                  for e in load_manifest(indir / "generated_texture_manifest.json")}
+
+    # Manifests adicionais de bancos generated: fallback, sem alterar a
+    # categoria principal. Se o PNG ja existe no consolidado, ele vence.
+    for name in (
+        "other_textures_manifest.json",
+        "texture_data_2_manifest.json",
+        "course_player_selection_manifest.json",
+    ):
+        for e in load_manifest(indir / name):
+            png_name = e.get("png")
+            if png_name:
+                generated.setdefault(png_name.replace("\\", "/").lower(), e)
+
+    tkmk = {e["png"].replace("\\", "/").lower(): e
+            for e in load_manifest(indir / "texture_tkmk00_manifest.json")}
+
+    # TKMK00 runtime layout/hashes medidos do caminho real de func_80095E10().
+    # O hash de runtime inclui a linha extra causada pelas coordenadas inclusivas
+    # de G_LOADTILE; este banco foi gerado contra a ROM base e o trace TKMK.
+    runtime_manifest = {}
+    for e in load_manifest(indir / "texture_tkmk00_runtime_manifest.json"):
+        if e.get("png"):
+            runtime_manifest[e["png"].replace("\\", "/").lower()] = e
+
+    # TKMK00 names: geometria exata medida no trace, separada do manifest
+    # runtime geral. O renderer HD procura o hash dos bytes ORIGINAIS
+    # (logical_hash), portanto nao usamos o runtime_hash aqui.
+    names_runtime_manifest = {}
+    names_manifest_path = indir / "texture_tkmk00_names_runtime_manifest.json"
+    for e in load_manifest(names_manifest_path):
+        if e.get("png") and e.get("symbol"):
+            names_runtime_manifest[e["png"].replace("\\", "/").lower()] = e
+
     karts = {e["png"].replace("\\", "/").lower(): e
              for e in load_manifest(indir / "kart_sprite_manifest.json")}
+
+    lakitu = {e["png"].replace("\\", "/").lower(): e
+              for e in load_manifest(indir / "lakitu_sprite_manifest.json")}
+
+    # Outros sprites de assets continuam como fallback do grupo de sprites,
+    # mas nao entram no contador de Lakitu nem no de karts canonicos.
+    asset_sprites = {e["png"].replace("\\", "/").lower(): e
+                     for e in load_manifest(indir / "asset_sprite_manifest.json")}
+
     # Geometria PORTATIL dos pedacos de menu (menu_tiles_geometry.json, versionado
     # no repositorio). Tem so coordenadas; os hashes sao calculados aqui a
     # partir dos bancos gerados da ROM de quem esta usando -- assim funciona
@@ -169,9 +245,7 @@ def main():
         n_geo = aplicar_geometria(geo_path, generated)
         print(f"Geometria de menu: {n_geo} imagem(ns) (menu_tiles_geometry.json)")
 
-    # Faixas MEDIDAS em runtime para as imagens grandes de menu (menu_tiles_measured.json, opcional).
-    # O jogo fatia essas imagens em varias faixas, cada uma com hash proprio;
-    # usamos os cortes medidos, reaproveitando o caminho de "tmem_halves".
+    # Faixas MEDIDAS em runtime para as imagens grandes de menu (opcional).
     medido_path = indir / "menu_tiles_measured.json"
     if medido_path.is_file():
         try:
@@ -187,13 +261,11 @@ def main():
                 aplicadas += 1
         print(f"Faixas medidas de menu: {aplicadas} imagem(ns) (menu_tiles_measured.json)")
 
-    # sprites de outras pastas de asset (lakitu, etc)
-    # asset_sprite_manifest.json: EXTRACT_MK64_TEXTURES.py (assets/<pasta>/*.json)
-    # lakitu_sprite_manifest.json: EXTRACT_LAKITU.py
-    for extra in ("asset_sprite_manifest.json", "lakitu_sprite_manifest.json"):
-        karts.update({e["png"].replace("\\", "/").lower(): e
-                      for e in load_manifest(indir / extra)})
-    print(f"Manifests: {len(generated)} generated + {len(karts)} karts")
+    print(f"Manifests: {len(generated)} generated + {len(tkmk)} TKMK00 + "
+          f"{len(karts)} karts + {len(lakitu)} lakitu")
+    if a.diagnose_yoshi:
+        _diagnose_yoshi(indir, generated)
+        return
 
     n_files = n_tiles = 0
     missed = []
@@ -203,7 +275,9 @@ def main():
         if only_prefix and not rel.lower().startswith(only_prefix):
             continue
 
-        entry = generated.get(rel.lower()) or karts.get(rel.lower())
+        key = rel.lower()
+        entry = (generated.get(key) or tkmk.get(key) or
+                 karts.get(key) or lakitu.get(key) or asset_sprites.get(key))
         m = NAME_RE.match(png.name)
 
         if entry is None and m is None:
@@ -212,6 +286,117 @@ def main():
 
         img = Image.open(png).convert("RGBA")
         w, hgt = img.size
+
+        # TKMK00 EXATO: texture_name_* e texture_ok foram medidos como
+        # imagens RGBA16 de dimensao real 64x12 / 31x19. Para essas entradas
+        # nao aplicamos a antiga regra de G_LOADTILE inclusivo (+1 linha):
+        # o hash usado pelo carregador HD e o hash dos bytes originais
+        # (logical_hash). A geometria do JSON e usada somente para recortar
+        # a arte HD na mesma janela logica.
+        special = None
+        if entry and entry.get("symbol") in {
+            "texture_name_dk", "texture_name_toad", "texture_name_bowser",
+            "texture_name_luigi", "texture_name_mario", "texture_name_peach",
+            "texture_name_wario", "texture_name_yoshi", "texture_ok"
+        }:
+            special = names_runtime_manifest.get(key) or runtime_manifest.get(key)
+        if special and special.get("tmem_tiles_runtime"):
+            orig_w = int(special.get("width", entry.get("width", w)))
+            orig_h = int(special.get("height", entry.get("height", hgt)))
+            for i, t in enumerate(special["tmem_tiles_runtime"]):
+                x0e = round(int(t.get("x0", 0)) / orig_w * w)
+                x1e = round(int(t.get("x1", orig_w)) / orig_w * w)
+                y0e = round(int(t.get("y0", 0)) / orig_h * hgt)
+                y1e = round(int(t.get("y1", orig_h)) / orig_h * hgt)
+                if x1e <= x0e:
+                    x1e = x0e + 1
+                if y1e <= y0e:
+                    y1e = y0e + 1
+                x1e = min(x1e, img.size[0])
+                y1e = min(y1e, img.size[1])
+                crop = img.crop((x0e, y0e, x1e, y1e))
+                hd_hash = t.get("logical_hash") or t.get("hash")
+                if not hd_hash:
+                    continue
+                write_tex(
+                    outdir, hd_hash, crop,
+                    f"{rel} [TKMK exact geometry {i}; logical hash]"
+                )
+                n_tiles += 1
+            n_files += 1
+            continue
+
+        # TKMK00 RUNTIME V1: usa os hashes que o func_80095E10/gfx_pc.c
+        # realmente calcula, sem tocar no renderer e sem ativar --tiles global.
+        # A imagem HD recebe a mesma janela logica do tile + 1 linha, porque
+        # G_LOADTILE usa coordenadas inclusivas. Quando essa linha ultrapassa
+        # a borda, repetimos a ultima linha da arte HD para fornecer bytes
+        # validos ao upload (o hash original pode vir do trace).
+        rt = runtime_manifest.get(key) if entry and entry.get("symbol") else None
+        if rt and rt.get("tmem_tiles_runtime"):
+            orig_w = int(rt.get("width", entry.get("width", w)))
+            orig_h = int(rt.get("height", entry.get("height", hgt)))
+            need_h = max(hgt, round((max(int(t.get("y1", 0)) for t in rt["tmem_tiles_runtime"]) + 1) / orig_h * hgt))
+            if need_h > hgt:
+                ext = Image.new("RGBA", (w, need_h))
+                ext.paste(img, (0, 0))
+                last = img.crop((0, hgt - 1, w, hgt))
+                for yy in range(hgt, need_h):
+                    ext.paste(last, (0, yy))
+                img = ext
+            for i, t in enumerate(rt["tmem_tiles_runtime"]):
+                x0e = round(int(t.get("x0", 0)) / orig_w * w)
+                x1e = round(int(t.get("x1", orig_w)) / orig_w * w)
+                y0e = round(int(t.get("y0", 0)) / orig_h * hgt)
+                y1e = round((int(t.get("y1", orig_h)) + 1) / orig_h * hgt)
+                if x1e <= x0e: x1e = x0e + 1
+                if y1e <= y0e: y1e = y0e + 1
+                y1e = min(y1e, img.size[1])
+                crop = img.crop((x0e, y0e, x1e, y1e))
+                # Sem trace, o ultimo tile pode conter a linha que o runtime
+                # le alem do fim da imagem. Nao inventamos esse hash: pulamos
+                # somente esse tile, mantendo todos os outros TKMK exatos.
+                if t.get("hash_source") == "computed" and int(t.get("y1", 0)) >= orig_h:
+                    continue
+                if crop.width > a.max or crop.height > a.max:
+                    print(f"  ! {rel} TKMK runtime {i}: {crop.width}x{crop.height} excede --max={a.max}, pulando")
+                    continue
+                write_tex(outdir, t["hash"], crop, f"{rel} [TKMK runtime {i}; {t.get('hash_source','computed')}]")
+                n_tiles += 1
+            n_files += 1
+            continue
+
+        # TESTE CIRURGICO: logo_mario_kart_64.
+        #
+        # O runtime original carrega esta RGBA32 256x128 em 32 blocos de
+        # 256x4 (4096 bytes). O HD continua sendo uma unica imagem 1024x512,
+        # mas o PAK precisa registrar a substituicao sob o hash ORIGINAL de
+        # cada bloco. Assim nao alteramos o gfx_pc.c nem o comportamento das
+        # outras texturas de menu.
+        #
+        # Os quatro blocos superiores/inferiores transparentes compartilham
+        # o mesmo hash original; as faixas HD correspondentes tambem sao
+        # identicas, portanto o mecanismo de deduplicacao do PAK e seguro.
+        if entry and entry.get("symbol") == "logo_mario_kart_64" and entry.get("tmem_tiles"):
+            orig_w = int(entry["width"])
+            orig_h = int(entry["height"])
+            for i, t in enumerate(entry["tmem_tiles"]):
+                x0 = round(int(t.get("x0", 0)) / orig_w * w)
+                x1 = round(int(t.get("x1", orig_w)) / orig_w * w)
+                y0 = round(int(t["y0"]) / orig_h * hgt)
+                y1 = round(int(t["y1"]) / orig_h * hgt)
+                if x1 <= x0:
+                    x1 = x0 + 1
+                if y1 <= y0:
+                    y1 = y0 + 1
+                crop = img.crop((x0, y0, x1, y1))
+                if crop.width > a.max or crop.height > a.max:
+                    print(f"  ! {rel} bloco {i}: {crop.width}x{crop.height} excede --max={a.max}, pulando")
+                    continue
+                write_tex(outdir, t["hash"], crop, f"{rel} [logo bloco {i}]")
+                n_tiles += 1
+            n_files += 1
+            continue
 
         # Sprites CI8 (karts) sao carregados em metades de 64x32 por causa do
         # limite de TMEM (a TLUT ocupa metade dos 4KB). Cada metade tem hash
@@ -321,8 +506,13 @@ def main():
             for b in blob:
                 f.write(b)
         print(f"\n{n_files} imagens processadas ({n_tiles} em faixas de TMEM)")
-        print(f"tex.pak: {len(PAK_ENTRIES)} texturas, "
+        print(f"tex.pak: {len(PAK_ENTRIES)} texturas unicas, "
               f"{pak.stat().st_size/1024/1024:.1f} MB em UM arquivo")
+        print(f"  hashes duplicados byte-identicos deduplicados: {_HASH_DEDUP_COUNT}")
+        if _HASH_COLLISIONS:
+            report = outdir / "tex_hash_collisions.json"
+            report.write_text(json.dumps(_HASH_COLLISIONS, indent=2), encoding="utf-8")
+            print(f"  ! {len(_HASH_COLLISIONS)} colisao(oes) FNV32 diferentes: {report}")
         print("")
         print(f"  ATENCAO: copie o arquivo {pak.name} para a RAIZ da pasta do jogo")
         print("  no console, AO LADO do MK64.xex -- NAO dentro de uma pasta tex\\.")
@@ -336,6 +526,11 @@ def main():
     total = list(outdir.rglob("*.tex"))
     total_mb = sum(p.stat().st_size for p in total) / 1024 / 1024
     print(f"{len(total)} arquivos .tex em {outdir}\\  ({total_mb:.1f} MB)")
+    print(f"Hashes duplicados byte-identicos deduplicados: {_HASH_DEDUP_COUNT}")
+    if _HASH_COLLISIONS:
+        report = outdir / "tex_hash_collisions.json"
+        report.write_text(json.dumps(_HASH_COLLISIONS, indent=2), encoding="utf-8")
+        print(f"! {len(_HASH_COLLISIONS)} colisao(oes) FNV32 diferentes: {report}")
     if missed:
         print(f"{len(missed)} PNGs sem hash conhecido (nao empacotados):")
         for r in missed[:15]:
