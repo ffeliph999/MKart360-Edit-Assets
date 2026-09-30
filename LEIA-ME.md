@@ -50,7 +50,6 @@ dessa pasta.
 | Arquivo | Função |
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extrai as texturas da ROM em PNGs editáveis |
-| `EXTRACT_LAKITU.py` | Extrai especificamente todos os quadros do Lakitu (semáforo, bandeirada, pesca, volta final, contramão etc.) |
 | `PACK_TEXTURES.py` | Empacota os PNGs editados de volta no formato que o jogo lê (`tex.pak`) |
 | `HALVE_PNGS.py` | Reduz PNGs pela metade, para caber na memória do console |
 | `SCAN_HALVES.py` | Ferramenta de diagnóstico: descobre onde ficam as "metades de baixo" dos sprites de kart que não bateram no hash |
@@ -86,12 +85,6 @@ segurança, só preenche o que falta). Use `--force` para regerar tudo do
 zero (descarta edições). Outras opções: `--no-karts`, `--no-generated`,
 `--out PASTA`.
 
-Para extrair só os quadros do Lakitu:
-
-```powershell
-py .\EXTRACT_LAKITU.py --rom .\baserom.us.z64
-py .\EXTRACT_LAKITU.py --rom .\baserom.us.z64 --force   # sobrescreve PNGs
-```
 
 **2. Editar**
 

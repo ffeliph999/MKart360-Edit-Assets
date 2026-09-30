@@ -15,7 +15,7 @@ Nothing in this file changes or replaces any upstream copyright, attribution, or
 ### Fork additions
 
 This license also covers the original files added by this fork: the HD
-texture tools (`EXTRACT_MK64_TEXTURES.py`, `EXTRACT_LAKITU.py`,
+texture tools (`EXTRACT_MK64_TEXTURES.py`,
 `PACK_TEXTURES.py`, `HALVE_PNGS.py`, `SCAN_HALVES.py`, `CROSS_CHECK.py`,
 `SCAN_MENU.py`, `menu_tiles_geometry.json`)
 and their documentation. Upstream files that were only modified by this fork

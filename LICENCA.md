@@ -21,7 +21,7 @@ A Licença MIT se aplica **somente** a:
   **Sirdankz**, nos termos do `LICENSE.md` original;
 - o código e a documentação originais adicionados por este fork, de autoria
   de **Felipe Souza**: as ferramentas de texturas HD (`EXTRACT_MK64_TEXTURES.py`,
-  `EXTRACT_LAKITU.py`, `PACK_TEXTURES.py`, `HALVE_PNGS.py`, `SCAN_HALVES.py`,
+  `PACK_TEXTURES.py`, `HALVE_PNGS.py`, `SCAN_HALVES.py`,
   `CROSS_CHECK.py`, `SCAN_MENU.py`, `menu_tiles_geometry.json`) e seus documentos;
 - as contribuições originais do colaborador **Eduardo**, do canal do YouTube
   **Edu dicas e gameplay**, incorporadas a este fork.

@@ -112,7 +112,6 @@ folder.
 | File | Purpose |
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extracts textures from the ROM into editable PNGs |
-| `EXTRACT_LAKITU.py` | Extracts all Lakitu frames specifically (starting light, checkered flag, fishing, final lap, wrong-way, etc.) |
 | `PACK_TEXTURES.py` | Packs edited PNGs back into the format the game reads (`tex.pak`) |
 | `HALVE_PNGS.py` | Halves PNG resolution, to fit the console's memory |
 | `SCAN_HALVES.py` | Diagnostic tool: finds where the "bottom halves" of kart sprites live when their hash doesn't match |
@@ -148,12 +147,6 @@ it only fills in what's missing). Use `--force` to regenerate everything
 from scratch (discards your edits). Other options: `--no-karts`,
 `--no-generated`, `--out FOLDER`.
 
-To extract only Lakitu's frames:
-
-```powershell
-py .\EXTRACT_LAKITU.py --rom .\baserom.us.z64
-py .\EXTRACT_LAKITU.py --rom .\baserom.us.z64 --force   # overwrites PNGs
-```
 
 **2. Edit**
 
