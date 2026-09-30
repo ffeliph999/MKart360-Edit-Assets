@@ -2106,20 +2106,20 @@
       {
         "x0": 0,
         "y0": 0,
-        "x1": 58,
-        "y1": 16,
-        "hash": "97b2000c",
-        "logical_hash": "97b2000c",
-        "hash_source": "computed"
+        "x1": 30,
+        "y1": 19,
+        "hash": "8ee3bd32",
+        "logical_hash": "8ee3bd32",
+        "hash_source": "trace"
       },
       {
-        "x0": 0,
-        "y0": 16,
+        "x0": 29,
+        "y0": 0,
         "x1": 58,
         "y1": 19,
-        "hash": "2217a155",
-        "logical_hash": "2217a155",
-        "hash_source": "computed"
+        "hash": "6e92dfd5",
+        "logical_hash": "6e92dfd5",
+        "hash_source": "trace"
       }
     ]
   },
@@ -2134,20 +2134,20 @@
       {
         "x0": 0,
         "y0": 0,
-        "x1": 58,
-        "y1": 16,
-        "hash": "f0de57c3",
-        "logical_hash": "f0de57c3",
-        "hash_source": "computed"
+        "x1": 30,
+        "y1": 19,
+        "hash": "77d53faf",
+        "logical_hash": "77d53faf",
+        "hash_source": "trace"
       },
       {
-        "x0": 0,
-        "y0": 16,
+        "x0": 29,
+        "y0": 0,
         "x1": 58,
         "y1": 19,
-        "hash": "1785e57f",
-        "logical_hash": "1785e57f",
-        "hash_source": "computed"
+        "hash": "e0abc29d",
+        "logical_hash": "e0abc29d",
+        "hash_source": "trace"
       }
     ]
   },
