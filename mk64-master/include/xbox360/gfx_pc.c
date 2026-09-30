@@ -1515,15 +1515,15 @@ static void import_texture(int tile) {
         }
 
         /* TKMK00 texture_ok e carregada em dois G_LOADTILEs horizontais.
-           O tex.pak guarda o OK completo como 31x19 -> 62x38 HD, enquanto
-           cada G_LOADTILE produz um hash somente da metade.
+           O tex.pak guarda o OK completo sob DFF91B13, enquanto cada
+           G_LOADTILE produz um hash somente da metade.
 
-           Nao carregamos o 62x38 inteiro para cada metade: isso quebraria
+           Nao carregamos a imagem inteira para cada metade: isso quebraria
            a amostragem porque node->width/height continuam representando
            o bloco N64. Quando os hashes das duas metades nao existem no PAK,
            usamos DFF91B13 como fonte e recortamos a metade correspondente.
-           O trace mostrou os blocos N64 em x=0 e x=15; em HD isso corresponde
-           a x=0 e x=30, com 32 pixels de largura para cada bloco. */
+           O trace mostrou os blocos N64 em x=0 e x=15; o tamanho do recorte
+           acompanha a escala da arte HD (2x, 4x, 8x etc.). */
         if (!hd_found && (hd_hash == 0x35d069ffu || hd_hash == 0x154196f3u)) {
             const uint32_t ok_full_hash = 0xdff91b13u;
             int ok_slot = x360_hdram_find(ok_full_hash);
@@ -1549,21 +1549,46 @@ static void import_texture(int tile) {
                 }
             }
 
-            if (ok_pixels && ok_w == 62u && ok_h == 38u) {
-                const uint32_t crop_x = (hd_hash == 0x35d069ffu) ? 0u : 30u;
-                const uint32_t crop_w = 32u;
-                const uint32_t crop_h = 38u;
-                uint8_t *ok_crop = tile_data;
+            /* O PNG do OK pode estar em 2x (62x38), 4x (124x76) ou
+               8x (248x152). A geometria original continua sendo 31x19
+               e os dois G_LOADTILEs continuam sendo as janelas x=0..15
+               e x=15..31. Calculamos o recorte pela escala da arte HD,
+               aceitando explicitamente as tres resolucoes usadas pelo
+               projeto sem alterar os outros caminhos de textura. */
+            if (ok_pixels &&
+                ((ok_w == 62u && ok_h == 38u) ||
+                 (ok_w == 124u && ok_h == 76u) ||
+                 (ok_w == 248u && ok_h == 152u))) {
+                const uint32_t ok_scale = ok_w / 31u;
+                const uint32_t crop_x = (hd_hash == 0x35d069ffu) ? 0u : (15u * ok_scale);
+                const uint32_t crop_w = 16u * ok_scale;
+                const uint32_t crop_h = 19u * ok_scale;
+                const uint32_t crop_bytes = crop_w * crop_h * 4u;
+                uint8_t *ok_crop;
 
-                for (uint32_t y = 0; y < crop_h; ++y) {
-                    memcpy(ok_crop + y * crop_w * 4,
-                           ok_pixels + (y * ok_w + crop_x) * 4,
-                           crop_w * 4);
+                /* 62x38 cabe no buffer pequeno usado pelas cargas N64.
+                   Resolucao maior (ex.: 248x152) nao cabe nos 8192 bytes,
+                   entao usamos o buffer HD grande. O OK completo ja foi
+                   copiado para x360_hdram quando veio do PAK, portanto
+                   x360_hd_buf pode ser reutilizado como destino do recorte. */
+                if (crop_bytes <= sizeof(tile_data))
+                    ok_crop = tile_data;
+                else if (crop_bytes <= sizeof(x360_hd_buf))
+                    ok_crop = x360_hd_buf;
+                else
+                    ok_crop = NULL;
+
+                if (ok_crop) {
+                    for (uint32_t y = 0; y < crop_h; ++y) {
+                        memcpy(ok_crop + y * crop_w * 4,
+                               ok_pixels + (y * ok_w + crop_x) * 4,
+                               crop_w * 4);
+                    }
+
+                    gfx_rapi->upload_texture(ok_crop, crop_w, crop_h);
+                    hd_found = true;
+                    hd_used_hash = hd_hash;
                 }
-
-                gfx_rapi->upload_texture(ok_crop, crop_w, crop_h);
-                hd_found = true;
-                hd_used_hash = hd_hash;
             }
         }
 

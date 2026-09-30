@@ -40,6 +40,70 @@ compiled game assets.
 
 ---
 
+## 🖼️ Preview
+
+### Previous background 
+
+<p align="center">
+  <img src="assets/screenshot1.png" width="800"/>
+</p>
+
+### Background later
+
+<p align="center">
+  <img src="assets/screenshot2.png" width="800"/>
+</p>
+
+### Select game first
+
+<p align="center">
+  <img src="assets/screenshot3.png" width="800"/>
+</p>
+
+### Select game later
+
+<p align="center">
+  <img src="assets/screenshot4.png" width="800"/>
+</p>
+
+### Select character first
+
+<p align="center">
+  <img src="assets/screenshot5.png" width="800"/>
+</p>
+
+### Select character later
+
+<p align="center">
+  <img src="assets/screenshot6.png" width="800"/>
+</p>
+
+### Select maps first
+
+<p align="center">
+  <img src="assets/screenshot7.png" width="800"/>
+</p>
+
+### Select maps later
+
+<p align="center">
+  <img src="assets/screenshot8.png" width="800"/>
+</p>
+
+### gameplay of the game from before
+
+<p align="center">
+  <img src="assets/screenshot9.png" width="800"/>
+</p>
+
+### gameplay of the game later
+
+<p align="center">
+  <img src="assets/screenshot10.png" width="800"/>
+</p>
+
+---
+
 ## New tools
 
 All scripts below live in `mk64-master/` and are run from inside that
