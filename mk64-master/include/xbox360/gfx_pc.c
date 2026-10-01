@@ -127,6 +127,9 @@ struct TextureHashmapNode {
     uint32_t texture_id;
     /* Hash da textura HD que esta na GPU neste no (0 = nenhuma). */
     uint32_t x360_hd_loaded;
+    /* Hash HD pedida a thread de leitura para este no (0 = nenhuma): quando
+       chegar, o no e reimportado para receber a versao HD. */
+    uint32_t x360_hd_pending;
     uint8_t cms, cmt;
     bool linear_filter;
 };
@@ -282,11 +285,12 @@ struct X360HDTexHeader {
    Guardar tambem os "hits" evita reabrir o mesmo arquivo do disco toda vez
    que a textura e reimportada (o que causava engasgos com muitas texturas
    HD, ex: sprites de kart). */
-#define X360_HDTEX_CACHE_BITS 12
-#define X360_HDTEX_CACHE_SIZE (1u << X360_HDTEX_CACHE_BITS)   /* 4096 entradas */
+#define X360_HDTEX_CACHE_BITS 14   /* era 12 (4096): o tex.pak passa de 7 mil texturas */
+#define X360_HDTEX_CACHE_SIZE (1u << X360_HDTEX_CACHE_BITS)   /* 16384 entradas */
 #define X360_HDTEX_ST_EMPTY 0
 #define X360_HDTEX_ST_MISS  1
 #define X360_HDTEX_ST_HIT   2
+#define X360_HDTEX_ST_PENDING 3   /* pedida a thread de leitura, ainda nao chegou */
 
 static uint32_t x360_hdtex_key[X360_HDTEX_CACHE_SIZE];
 static uint8_t  x360_hdtex_state[X360_HDTEX_CACHE_SIZE];
@@ -308,8 +312,12 @@ static uint8_t x360_hdtex_lookup(uint32_t hash) {
 }
 
 static void x360_hdtex_remember(uint32_t hash, uint8_t st) {
-    if (x360_hdtex_used >= X360_HDTEX_CACHE_SIZE - 1) return; /* nunca enche de vez */
     unsigned i = x360_hdtex_slot(hash);
+    if (x360_hdtex_state[i] != X360_HDTEX_ST_EMPTY && x360_hdtex_key[i] == hash) {
+        x360_hdtex_state[i] = st;   /* atualizar e sempre permitido (ex.: carregando -> pronta) */
+        return;
+    }
+    if (x360_hdtex_used >= X360_HDTEX_CACHE_SIZE - 1) return; /* nunca enche de vez */
     if (x360_hdtex_state[i] == X360_HDTEX_ST_EMPTY) {
         x360_hdtex_key[i] = hash;
         ++x360_hdtex_used;
@@ -505,6 +513,20 @@ static uint8_t x360_hd_buf[2048 * 2048 * 4];
    quedas de desempenho sem adivinhar a causa. */
 #define X360_HDTEX_STATS 0
 static uint32_t x360_st_pak, x360_st_ramhit, x360_st_evict, x360_st_up, x360_st_upkb, x360_st_frames;
+/* tempo gasto (microssegundos) lendo do disco, descomprimindo e enviando a GPU,
+   e acertos da leitura antecipada do tex.pak */
+static uint32_t x360_st_disk_us, x360_st_dec_us, x360_st_up_us, x360_st_rahit, x360_st_reads;
+static LARGE_INTEGER x360_st_freq;
+/* tempo de cada quadro: o maior do periodo e quantos passaram do orcamento
+   de 60 FPS (16,7 ms) e de 30 FPS (33,3 ms) */
+static uint32_t x360_st_fmax_us, x360_st_f17, x360_st_f34;
+static LARGE_INTEGER x360_st_last_frame;
+static uint32_t x360_us_since(const LARGE_INTEGER *t0) {
+    LARGE_INTEGER t1;
+    QueryPerformanceCounter(&t1);
+    if (!x360_st_freq.QuadPart) QueryPerformanceFrequency(&x360_st_freq);
+    return (uint32_t)((t1.QuadPart - t0->QuadPart) * 1000000 / x360_st_freq.QuadPart);
+}
 
 #define X360_HDRAM_SLOTS   1024
 #define X360_HDRAM_BUDGET  (40u << 20)   /* 40 MB: a memoria do 360 e
@@ -655,6 +677,18 @@ static void x360_dxt_decode(const uint8_t *src, uint32_t w, uint32_t h, uint32_t
 #define X360_PAK_MAGIC 0x4844504Bu   /* "HDPK" */
 
 struct X360PakEntry { uint32_t hash, off, size, w, h, fmt; };
+
+/* Leitura antecipada: cada leitura do disco tem um custo fixo de latencia,
+   quase igual para 8 KB ou 256 KB. As estatisticas mostraram 150-240 leituras
+   por segundo na primeira passagem pelos menus -- e o DXT, que reduziu os
+   BYTES, nao mudou as travadas. Como os pedacos de uma mesma imagem ficam
+   lado a lado no tex.pak, lemos um trecho maior de uma vez e servimos os
+   pedidos seguintes da memoria. 0 desliga. */
+#define X360_PAK_READAHEAD_KB 64   /* medido: melhor resultado em pendrive (0, 64 e 256 testados) */
+#if X360_PAK_READAHEAD_KB
+static uint8_t x360_ra_buf[X360_PAK_READAHEAD_KB * 1024];
+static uint32_t x360_ra_off, x360_ra_len;
+#endif
 static uint32_t x360_pak_last_fmt, x360_pak_last_size;
 static HANDLE x360_pak_file = INVALID_HANDLE_VALUE;
 static struct X360PakEntry *x360_pak_index;
@@ -723,10 +757,43 @@ static void x360_pak_open(void) {
     }
 }
 
-static bool x360_pak_read(uint32_t hash, uint32_t *w, uint32_t *h) {
-    x360_pak_open();
-    if (x360_pak_file == INVALID_HANDLE_VALUE) return false;
+static bool x360_pak_fetch(uint32_t off, uint32_t size, uint8_t *dest) {
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
+    DWORD got = 0;
+    bool ok = false;
+#if X360_PAK_READAHEAD_KB
+    if (size <= sizeof(x360_ra_buf)) {
+        if (x360_ra_len && off >= x360_ra_off && off + size <= x360_ra_off + x360_ra_len) {
+            memcpy(dest, x360_ra_buf + (off - x360_ra_off), size);
+            ++x360_st_rahit;
+            return true;   /* da memoria: nao conta tempo de disco */
+        }
+        if (SetFilePointer(x360_pak_file, (LONG)off, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER &&
+            ReadFile(x360_pak_file, x360_ra_buf, sizeof(x360_ra_buf), &got, NULL) && got >= size) {
+            x360_ra_off = off;
+            x360_ra_len = got;
+            memcpy(dest, x360_ra_buf, size);
+            ok = true;
+        } else {
+            x360_ra_len = 0;
+        }
+        ++x360_st_reads;
+        x360_st_disk_us += x360_us_since(&t0);
+        return ok;
+    }
+#endif
+    if (SetFilePointer(x360_pak_file, (LONG)off, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER &&
+        ReadFile(x360_pak_file, dest, size, &got, NULL) && got == size)
+        ok = true;
+    ++x360_st_reads;
+    x360_st_disk_us += x360_us_since(&t0);
+    return ok;
+}
 
+static const struct X360PakEntry *x360_pak_find(uint32_t hash) {
+    x360_pak_open();
+    if (x360_pak_file == INVALID_HANDLE_VALUE) return NULL;
     const struct X360PakEntry *e = NULL;
     if (x360_pak_lut) {
         uint32_t k = hash & x360_pak_lut_mask;
@@ -740,28 +807,164 @@ static bool x360_pak_read(uint32_t hash, uint32_t *w, uint32_t *h) {
         for (uint32_t i = 0; i < x360_pak_count; ++i)
             if (x360_pak_index[i].hash == hash) { e = &x360_pak_index[i]; break; }
     }
+    return e;
+}
+
+static bool x360_pak_read(uint32_t hash, uint32_t *w, uint32_t *h) {
+    x360_pak_open();
+    if (x360_pak_file == INVALID_HANDLE_VALUE) return false;
+    const struct X360PakEntry *e = x360_pak_find(hash);
     if (e) {
         if (!e->w || !e->h || e->w > 2048 || e->h > 2048 || e->fmt > 2) return false;
         if (!e->size || e->size != x360_dxt_size(e->w, e->h, e->fmt)) return false;
-        if (SetFilePointer(x360_pak_file, (LONG)e->off, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER)
-            return false;
-        DWORD got = 0;
         /* RGBA vai direto para x360_hd_buf; DXT e lido comprimido e
            descomprimido para x360_hd_buf (os dados comprimidos ficam em
            x360_dxt_raw para o cache em RAM). */
         uint8_t *dest = (e->fmt == 0) ? x360_hd_buf : x360_dxt_raw;
         if (e->size > ((e->fmt == 0) ? sizeof(x360_hd_buf) : sizeof(x360_dxt_raw)))
             return false;
-        if (!ReadFile(x360_pak_file, dest, e->size, &got, NULL) || got != e->size)
+        if (!x360_pak_fetch(e->off, e->size, dest))
             return false;
-        if (e->fmt != 0)
+        if (e->fmt != 0) {
+            LARGE_INTEGER td;
+            QueryPerformanceCounter(&td);
             x360_dxt_decode(x360_dxt_raw, e->w, e->h, e->fmt, x360_hd_buf);
+            x360_st_dec_us += x360_us_since(&td);
+        }
         x360_pak_last_fmt = e->fmt;
         x360_pak_last_size = e->size;
         *w = e->w; *h = e->h;
         return true;
     }
     return false;
+}
+
+/* ---- Carregamento em segundo plano ----------------------------------------
+   Uma textura HD que ainda nao esta no cache em RAM era lida do disco no meio
+   do quadro, e o jogo esperava. Em eventos que mostram varias texturas novas
+   de uma vez (batida num adversario, troca de volta) isso aparecia como
+   travadinha -- principalmente no HD interno, onde cada leitura fora de
+   sequencia move a cabeca de leitura.
+   Agora uma thread separada faz as leituras. Na primeira vez, a textura
+   aparece na versao original por alguns quadros e a HD entra quando chega.
+   Regras de seguranca: a thread de leitura SO le o disco (com seu proprio
+   acesso ao arquivo) e entrega os dados numa fila; o cache em RAM, as tabelas
+   e a GPU continuam sendo usados SOMENTE pela thread do jogo.
+   0 desliga (volta a ler na hora, como antes). */
+/* 0 = leitura na hora (comportamento aprovado nos testes).
+   1 = EXPERIMENTAL: so a PRIMEIRA leitura de cada textura e feita em segundo
+       plano; uma textura que ja apareceu em HD e foi descartada do cache e
+       relida na hora (como em 0), para nunca voltar a versao original.
+       A versao anterior deste modo lia TUDO em segundo plano e, com o cache
+       cheio nas corridas, as texturas ficavam alternando entre HD e original. */
+#define X360_HD_ASYNC 0
+#define X360_ASYNC_Q 512
+
+struct X360AsyncReq  { uint32_t hash, off, size, w, h, fmt; };
+struct X360AsyncDone { uint32_t hash, w, h, fmt, size; uint8_t *data; };
+static struct X360AsyncReq  x360_aq[X360_ASYNC_Q];
+static struct X360AsyncDone x360_ad[X360_ASYNC_Q];
+static unsigned x360_aq_head, x360_aq_tail, x360_ad_head, x360_ad_tail;
+static CRITICAL_SECTION x360_async_cs;
+static HANDLE x360_async_evt, x360_async_file = INVALID_HANDLE_VALUE;
+static bool x360_async_ready, x360_async_tried;
+
+static DWORD WINAPI x360_async_main(LPVOID unused) {
+    (void)unused;
+    for (;;) {
+        WaitForSingleObject(x360_async_evt, INFINITE);
+        for (;;) {
+            struct X360AsyncReq r;
+            bool tem = false;
+            EnterCriticalSection(&x360_async_cs);
+            if (x360_aq_head != x360_aq_tail) {
+                r = x360_aq[x360_aq_tail % X360_ASYNC_Q];
+                ++x360_aq_tail;
+                tem = true;
+            }
+            LeaveCriticalSection(&x360_async_cs);
+            if (!tem) break;
+            uint8_t *buf = (uint8_t *)malloc(r.size);
+            DWORD got = 0;
+            if (!buf ||
+                SetFilePointer(x360_async_file, (LONG)r.off, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
+                !ReadFile(x360_async_file, buf, r.size, &got, NULL) || got != r.size) {
+                free(buf);
+                buf = NULL;            /* entregue como falha: vira MISS */
+            }
+            EnterCriticalSection(&x360_async_cs);
+            {
+                struct X360AsyncDone d = { r.hash, r.w, r.h, r.fmt, r.size, buf };
+                x360_ad[x360_ad_head % X360_ASYNC_Q] = d;
+                ++x360_ad_head;        /* a fila de prontas nunca transborda: tem o
+                                          mesmo tamanho da de pedidos e e esvaziada
+                                          todo quadro */
+            }
+            LeaveCriticalSection(&x360_async_cs);
+        }
+    }
+    return 0;
+}
+
+static void x360_async_init(void) {
+    if (x360_async_tried) return;
+    x360_async_tried = true;
+#if X360_HD_ASYNC
+    if (x360_pak_file == INVALID_HANDLE_VALUE) return;
+    x360_async_file = CreateFileA("game:\\tex.pak", GENERIC_READ, FILE_SHARE_READ, NULL,
+                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (x360_async_file == INVALID_HANDLE_VALUE) return;
+    InitializeCriticalSection(&x360_async_cs);
+    x360_async_evt = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!x360_async_evt) return;
+    HANDLE th = CreateThread(NULL, 64 * 1024, x360_async_main, NULL, 0, NULL);
+    if (!th) return;
+    CloseHandle(th);
+    x360_async_ready = true;
+#endif
+}
+
+/* Pede a textura a thread de leitura. Devolve false se a fila estiver cheia
+   (o pedido sera repetido numa proxima importacao). */
+static bool x360_async_request(const struct X360PakEntry *e) {
+    bool ok = false;
+    EnterCriticalSection(&x360_async_cs);
+    if (x360_aq_head - x360_aq_tail < X360_ASYNC_Q &&
+        x360_ad_head - x360_ad_tail + (x360_aq_head - x360_aq_tail) < X360_ASYNC_Q) {
+        struct X360AsyncReq r = { e->hash, e->off, e->size, e->w, e->h, e->fmt };
+        x360_aq[x360_aq_head % X360_ASYNC_Q] = r;
+        ++x360_aq_head;
+        ok = true;
+    }
+    LeaveCriticalSection(&x360_async_cs);
+    if (ok) SetEvent(x360_async_evt);
+    return ok;
+}
+
+/* Chamada pela thread do jogo no inicio de cada quadro: passa as texturas
+   que chegaram para o cache em RAM. */
+static void x360_async_drain(void) {
+    if (!x360_async_ready) return;
+    for (;;) {
+        struct X360AsyncDone d;
+        bool tem = false;
+        EnterCriticalSection(&x360_async_cs);
+        if (x360_ad_head != x360_ad_tail) {
+            d = x360_ad[x360_ad_tail % X360_ASYNC_Q];
+            ++x360_ad_tail;
+            tem = true;
+        }
+        LeaveCriticalSection(&x360_async_cs);
+        if (!tem) break;
+        if (d.data) {
+            x360_hdram_store_fmt(d.hash, d.w, d.h, d.data, d.size, (uint8_t)d.fmt);
+            free(d.data);
+            ++x360_st_pak;
+            x360_hdtex_remember(d.hash, X360_HDTEX_ST_HIT);
+        } else {
+            x360_hdtex_remember(d.hash, X360_HDTEX_ST_MISS);
+        }
+    }
 }
 
 static bool x360_try_load_hd_texture(uint32_t hash) {
@@ -773,15 +976,43 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
         x360_hdram[slot].last_used = ++x360_hdram_clock;
         ++x360_st_ramhit; ++x360_st_up;
         x360_st_upkb += (x360_hdram[slot].w * x360_hdram[slot].h * 4) >> 10;
+        LARGE_INTEGER tu;
         if (x360_hdram[slot].fmt != 0) {
+            QueryPerformanceCounter(&tu);
             x360_dxt_decode(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h,
                             x360_hdram[slot].fmt, x360_hd_buf);
+            x360_st_dec_us += x360_us_since(&tu);
+            QueryPerformanceCounter(&tu);
             gfx_rapi->upload_texture(x360_hd_buf, x360_hdram[slot].w, x360_hdram[slot].h);
         } else {
+            QueryPerformanceCounter(&tu);
             gfx_rapi->upload_texture(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h);
         }
+        x360_st_up_us += x360_us_since(&tu);
         return true;
     }
+
+#if X360_HD_ASYNC
+    /* Ja pedida e ainda nao chegou: usa a original por enquanto. */
+    if (x360_hdtex_lookup(hash) == X360_HDTEX_ST_PENDING) return false;
+    {
+        const struct X360PakEntry *pe = x360_pak_find(hash);
+        x360_async_init();
+        /* Ja foi carregada antes (e descartada do cache): rele na hora, para
+           nao voltar a versao original no meio do jogo. */
+        if (x360_async_ready && x360_hdtex_lookup(hash) != X360_HDTEX_ST_HIT) {
+            if (!pe) {                         /* nao esta no pak: sem HD */
+                x360_hdtex_remember(hash, X360_HDTEX_ST_MISS);
+                return false;
+            }
+            if (pe->w && pe->h && pe->w <= 2048 && pe->h <= 2048 && pe->fmt <= 2 &&
+                pe->size && pe->size == x360_dxt_size(pe->w, pe->h, pe->fmt) &&
+                x360_async_request(pe))
+                x360_hdtex_remember(hash, X360_HDTEX_ST_PENDING);
+            return false;                      /* original agora; HD num proximo quadro */
+        }
+    }
+#endif
 
     /* Caminho preferencial: tex.pak (arquivo unico, ja aberto). */
     {
@@ -793,10 +1024,25 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
                                      (uint8_t)x360_pak_last_fmt);
             else
                 x360_hdram_store(hash, pw, ph, x360_hd_buf, pw * ph * 4);
+            LARGE_INTEGER tu;
+            QueryPerformanceCounter(&tu);
             gfx_rapi->upload_texture(x360_hd_buf, pw, ph);
+            x360_st_up_us += x360_us_since(&tu);
             x360_hdtex_remember(hash, X360_HDTEX_ST_HIT);
             return true;
         }
+    }
+
+    /* Com o tex.pak aberto, uma textura que nao esta nele simplesmente nao tem
+       versao HD: nao tentamos o .tex avulso no disco. Antes, a primeira vez de
+       cada textura sem HD custava uma tentativa de abrir arquivo -- e eventos
+       que mostram muitas texturas novas de uma vez (batida num adversario, o
+       Lakitu na troca de volta) geravam dezenas dessas consultas no mesmo
+       quadro, visiveis como travadinha (principalmente no HD interno). Os .tex
+       avulsos continuam funcionando para quem nao usa o tex.pak. */
+    if (x360_pak_file != INVALID_HANDLE_VALUE) {
+        x360_hdtex_remember(hash, X360_HDTEX_ST_MISS);
+        return false;
     }
 
     char path[64];
@@ -915,11 +1161,21 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
                  (*node)->tlut_mode == (rdp.other_mode_h & (3U << G_MDSFT_TEXTLUT))))) {
             gfx_rapi->select_texture(tile, (*node)->texture_id);
             *n = *node;
-            const bool hit = gfx_loaded_texture(tile)->rows == 0
+            bool hit = gfx_loaded_texture(tile)->rows == 0
                 && (*node)->source_size == gfx_loaded_texture(tile)->size_bytes
                 && (*node)->line_bytes == gfx_texture_tile(tile)->line_size_bytes
                 && (*node)->content_hash == content
                 && (fmt != G_IM_FMT_CI || (*node)->palette_hash == palette_content);
+            /* Carregamento em segundo plano: a versao HD deste no chegou ->
+               forca reimportacao para envia-la a GPU. Se falhou, desiste. */
+            if ((*node)->x360_hd_pending) {
+                const uint8_t pst = x360_hdtex_lookup((*node)->x360_hd_pending);
+                if (pst == X360_HDTEX_ST_MISS)
+                    (*node)->x360_hd_pending = 0;
+                else if (pst != X360_HDTEX_ST_PENDING &&
+                         x360_hdram_find((*node)->x360_hd_pending) >= 0)
+                    hit = false;
+            }
             const bool changed = (*node)->content_hash != content
                 || (fmt == G_IM_FMT_CI && (*node)->palette_hash != palette_content);
 
@@ -995,6 +1251,7 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     (*node)->content_hash = content;
     (*node)->palette_hash = palette_content;
     (*node)->x360_hd_loaded = 0;  /* no novo: a GPU ainda nao tem textura HD dele */
+    (*node)->x360_hd_pending = 0;
     x360_trace_texture(tile, 0, content, false);
     *n = *node;
     return false;
@@ -1702,6 +1959,14 @@ static void import_texture(int tile) {
         }
 
         node->x360_hd_loaded = hd_found ? hd_used_hash : 0;
+        node->x360_hd_pending = 0;
+        if (!hd_found) {
+            if (x360_hdtex_lookup(hd_hash) == X360_HDTEX_ST_PENDING)
+                node->x360_hd_pending = hd_hash;
+            else if (hd_logical_hash &&
+                     x360_hdtex_lookup(hd_logical_hash) == X360_HDTEX_ST_PENDING)
+                node->x360_hd_pending = hd_logical_hash;
+        }
 
         /* Trace de diagnostico (desligado). Para reativar, troque o 0 por 1
            abaixo: grava em game:\hdtex-trace.log o hash calculado em runtime
@@ -4295,6 +4560,7 @@ struct GfxRenderingAPI *gfx_get_current_rendering_api(void) {
 }
 
 void gfx_start_frame(void) {
+    x360_async_drain();
     /* B17G13 RACE-TIMER-CORRELATION: sparse timeline keyed to the exact on-screen race timer.
      * At most four lines per GAME second. */
     {
@@ -4401,12 +4667,28 @@ void gfx_run(Gfx *commands) {
 
 void gfx_end_frame(void) {
 #if X360_HDTEX_STATS
+    {
+        LARGE_INTEGER agora;
+        QueryPerformanceCounter(&agora);
+        if (!x360_st_freq.QuadPart) QueryPerformanceFrequency(&x360_st_freq);
+        if (x360_st_last_frame.QuadPart) {
+            uint32_t us = (uint32_t)((agora.QuadPart - x360_st_last_frame.QuadPart) * 1000000
+                                     / x360_st_freq.QuadPart);
+            if (us > x360_st_fmax_us) x360_st_fmax_us = us;
+            if (us > 16700) ++x360_st_f17;
+            if (us > 33300) ++x360_st_f34;
+        }
+        x360_st_last_frame = agora;
+    }
     if (++x360_st_frames >= 60) {
         char line[200];
         int n = _snprintf(line, sizeof(line) - 1,
-            "pak=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u\r\n",
-            x360_st_pak, x360_st_ramhit, x360_st_evict, x360_st_up, x360_st_upkb,
-            (unsigned)(x360_hdram_bytes >> 20));
+            "pak=%u reads=%u rahit=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u "
+            "diskMS=%u decMS=%u uploadMS=%u frameMaxMS=%u acima17ms=%u acima33ms=%u\r\n",
+            x360_st_pak, x360_st_reads, x360_st_rahit, x360_st_ramhit, x360_st_evict,
+            x360_st_up, x360_st_upkb, (unsigned)(x360_hdram_bytes >> 20),
+            x360_st_disk_us / 1000, x360_st_dec_us / 1000, x360_st_up_us / 1000,
+            x360_st_fmax_us / 1000, x360_st_f17, x360_st_f34);
         HANDLE f = CreateFileA("game:\\hdtex-stats.log", GENERIC_WRITE, FILE_SHARE_READ,
                                NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (f != INVALID_HANDLE_VALUE) {
@@ -4416,6 +4698,8 @@ void gfx_end_frame(void) {
             CloseHandle(f);
         }
         x360_st_pak = x360_st_ramhit = x360_st_evict = x360_st_up = x360_st_upkb = 0;
+        x360_st_reads = x360_st_rahit = x360_st_disk_us = x360_st_dec_us = x360_st_up_us = 0;
+        x360_st_fmax_us = x360_st_f17 = x360_st_f34 = 0;
         x360_st_frames = 0;
     }
 #endif

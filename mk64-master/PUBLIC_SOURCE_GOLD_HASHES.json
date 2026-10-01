@@ -6,7 +6,7 @@
   "src/racing/memory.c": "3550ccf72cdc6c382c8a45a7227457cd10074449ad96e59b8850f5b44c9217d7",
   "src/xbox360/xbox360_asset_loader.cpp": "70a427097d48d4d18d25e9aee54d79de32c643325803b9aec584efb562e88b0f",
   "src/xbox360/xbox360_netplay.cpp": "f73de46cc04ddc2dbe6e773f3e0af5691d265e076a362bd82bb64aecb1b38153",
-  "src/xbox360/xbox360_renderer.cpp": "e891b77e7d70aad8c5b3711bbef4c9a7b72b7a2b6549f83418dd3d369926b80d",
+  "src/xbox360/xbox360_renderer.cpp": "3921008292f49c64b1e0560a6be503baba628d3789e373e0594b15c3f6c6e583",
   "src/xbox360/xbox360_save_input.cpp": "596242adf2a33fe81fd682e355301a55452c44d4bd51b0023194a058221631db",
   "include/xbox360/netplay_view.h": "0b5a48ffa55cde71975f3f4830c92c2aca509d0ab14cf622bd811dc0795300f1",
   "src/xbox360/xbox360_input.cpp": "057843633677005ed7245100f02d7a9678dc7269e7b4dd620c5dd807f4a15621",
