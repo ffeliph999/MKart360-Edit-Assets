@@ -41,6 +41,7 @@ compiled game assets.
 ### Known limitations
 
 - High-resolution textures (higher than HQ) can overload the Xbox 360 hardware and cause crashes or performance issues; HD support exists but is limited to the console's hardware.
+- Running tex.pak on internal or external mechanical hard disk drives may cause stuttering during gameplay; it is recommended to use USB flash drives (pen drives) or SSDs.
 - DXT compression is lossy: it shrinks `tex.pak` a lot, but can add visible
   grain/banding and small color shifts (see
   [Compressed tex.pak](#compressed-texpak-dxt-optional)).
