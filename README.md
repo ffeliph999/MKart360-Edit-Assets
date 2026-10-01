@@ -126,6 +126,8 @@ folder.
 | `CROSS_CHECK.py` | Cross-references the game's trace log with the manifests to find textures that weren't found |
 | `SCAN_MENU.py` | Measures how the game splits large menu images into blocks, from a trace log |
 | `menu_tiles_geometry.json` | Measured block layout of the menu images (coordinates only, no ROM data) |
+| `GERAR_FUNDOS_MENU_HD.py` | Bilingual wizard (EN/PT-BR) that builds the tinted menu backgrounds in HD in one go (see [Tinted menu backgrounds](#tinted-menu-backgrounds)) |
+| `TINT_MENU_BACKGROUNDS.py` | Reproduces the game's background tinting and generates the HD backgrounds and their hashes (used by the wizard) |
 
 One-time install requirement:
 
@@ -295,6 +297,47 @@ py .\SCAN_MENU.py --log .\hdtex-trace.log --only generated/course_player_selecti
 
 It adds the new images to `menu_tiles_geometry.json`. Set the trace back to
 `0` afterwards.
+
+### Tinted menu backgrounds
+
+The mode select (pink), character select (green) and course select (blue)
+screens show the **same image as the title screen background**, but the
+game converts it to greyscale and tints it at runtime
+(`convert_img_to_greyscale` + `adjust_img_colour` in `menu_items.c`). These
+tinted images don't exist in the ROM, so they can't be extracted, and their
+hashes differ from the title background — which is why they kept showing
+in the original resolution.
+
+`TINT_MENU_BACKGROUNDS.py` reproduces that conversion exactly (verified
+byte-for-byte against the game's own code), computes the hash of each
+block the game loads, and applies the same tint to **your HD art** of the
+title background. The block layout comes from the manifest already
+included in the repository — no trace log is needed.
+
+The easiest way is the wizard (double-click it, or run it with `py`):
+
+```powershell
+pip install pillow numpy
+py .\GERAR_FUNDOS_MENU_HD.py
+```
+
+It asks for the language (English or Portuguese) and the ROM, extracts the
+original PNGs into a **separate** `extracted_originais\` folder (your
+`extracted_textures\` is not touched), and generates the backgrounds. You
+need the HD art of the title background in place first:
+`extracted_textures\generated\texture_tkmk00\background_blue_sky.png`
+(and/or `background_sunset.png`, the extra-mode background).
+
+The results go to `extracted_textures\generated\texture_tkmk00\tinted\`
+(`__modo` pink, `__personagem` green, `__pista` blue). You can touch them
+up; to regenerate one, delete the PNG and run the wizard again. Then pack
+as usual (`py .\PACK_TEXTURES.py --pak`).
+
+- Use the **same ROM** the game runs with, or the hashes won't match.
+- `extracted_originais\` contains ROM-derived data: don't commit it.
+- Running `TINT_MENU_BACKGROUNDS.py` directly also works, with
+  `--originais FOLDER` pointing to a separate extraction of the original
+  PNGs.
 
 ### Common issues
 
