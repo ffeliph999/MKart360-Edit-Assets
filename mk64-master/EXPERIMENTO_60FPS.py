@@ -130,11 +130,11 @@ def unpatch_main_c(text):
     if not is_patched(text):
         return text, False
     text = re.sub(
-        r"#ifdef XBOX360_PORT\n/\* ===== EXPERIMENTO BETA.*?#endif\n\n?",
+        r"#ifdef XBOX360_PORT\n/\* ===== EXPERIMENTO BETA.*?#endif\n",
         "", text, count=1, flags=re.S)
     text = re.sub(
         rf"#if defined\(XBOX360_PORT\) && {MARKER}\n"
-        rf"    x360_exp60_active = .*?\n#endif\n\n?",
+        rf"    x360_exp60_active = .*?\n#endif\n",
         "", text, flags=re.S)
     text = re.sub(
         rf"#if defined\(XBOX360_PORT\) && {MARKER}\n"

@@ -514,6 +514,7 @@ static uint32_t x360_st_pak, x360_st_ramhit, x360_st_evict, x360_st_up, x360_st_
 struct X360HDRamEntry {
     uint32_t hash, w, h, bytes, last_used;
     uint8_t *data;
+    uint8_t fmt;   /* 0 = RGBA32, 1 = DXT1, 2 = DXT5 (dados comprimidos) */
 };
 static struct X360HDRamEntry x360_hdram[X360_HDRAM_SLOTS];
 static uint32_t x360_hdram_bytes, x360_hdram_clock;
@@ -545,7 +546,8 @@ static int x360_hdram_evict_one(void) {
     return victim;
 }
 
-static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src, uint32_t bytes) {
+static void x360_hdram_store_fmt(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src,
+                                 uint32_t bytes, uint8_t fmt) {
     if (bytes > X360_HDRAM_BUDGET) return;
     /* libera por BYTES... */
     while (x360_hdram_bytes + bytes > X360_HDRAM_BUDGET)
@@ -565,8 +567,83 @@ static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_
     x360_hdram[slot].h = h;
     x360_hdram[slot].bytes = bytes;
     x360_hdram[slot].data = buf;
+    x360_hdram[slot].fmt = fmt;
     x360_hdram[slot].last_used = ++x360_hdram_clock;
     x360_hdram_bytes += bytes;
+}
+
+static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src, uint32_t bytes) {
+    x360_hdram_store_fmt(hash, w, h, src, bytes, 0);
+}
+
+/* ---- Decodificador DXT1/DXT5 (BC1/BC3) -----------------------------------
+   O tex.pak pode guardar texturas comprimidas em DXT: 4 a 8 vezes menos
+   bytes para ler do disco e para manter no cache em RAM. Aqui elas sao
+   descomprimidas para RGBA32 antes do envio a GPU (o renderer continua
+   recebendo RGBA, sem mudancas). Leitura byte a byte: independe da ordem de
+   bytes da CPU (o Xenon e big-endian; o formato DXT e little-endian). */
+static uint8_t x360_dxt_raw[2048 * 2048];   /* maior caso: DXT5 2048x2048 */
+
+static void x360_rgb565(uint32_t c, uint8_t *o) {
+    uint32_t r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+    o[0] = (uint8_t)((r << 3) | (r >> 2));
+    o[1] = (uint8_t)((g << 2) | (g >> 4));
+    o[2] = (uint8_t)((b << 3) | (b >> 2));
+}
+
+static uint32_t x360_dxt_size(uint32_t w, uint32_t h, uint32_t fmt) {
+    if (fmt == 0) return w * h * 4;
+    if ((w & 3) || (h & 3)) return 0;
+    return (w / 4) * (h / 4) * (fmt == 2 ? 16u : 8u);
+}
+
+static void x360_dxt_decode(const uint8_t *src, uint32_t w, uint32_t h, uint32_t fmt, uint8_t *dst) {
+    const uint32_t bw = w / 4, bh = h / 4, step = (fmt == 2) ? 16u : 8u;
+    for (uint32_t by = 0; by < bh; ++by) {
+        for (uint32_t bx = 0; bx < bw; ++bx) {
+            const uint8_t *blk = src + (by * bw + bx) * step;
+            uint8_t alpha[16];
+            if (fmt == 2) {
+                uint32_t a0 = blk[0], a1 = blk[1], pal[8];
+                pal[0] = a0; pal[1] = a1;
+                if (a0 > a1) {
+                    for (uint32_t k = 1; k <= 6; ++k)
+                        pal[k + 1] = ((7 - k) * a0 + k * a1) / 7;
+                } else {
+                    for (uint32_t k = 1; k <= 4; ++k)
+                        pal[k + 1] = ((5 - k) * a0 + k * a1) / 5;
+                    pal[6] = 0; pal[7] = 255;
+                }
+                unsigned long long bits = 0;
+                for (int k = 5; k >= 0; --k) bits = (bits << 8) | blk[2 + k];
+                for (uint32_t i = 0; i < 16; ++i)
+                    alpha[i] = (uint8_t)pal[(bits >> (3 * i)) & 7];
+                blk += 8;
+            }
+            const uint32_t c0 = blk[0] | (blk[1] << 8), c1 = blk[2] | (blk[3] << 8);
+            const uint32_t idx = blk[4] | (blk[5] << 8) | (blk[6] << 16) | ((uint32_t)blk[7] << 24);
+            uint8_t col[4][4];
+            x360_rgb565(c0, col[0]); x360_rgb565(c1, col[1]);
+            const bool quatro = (fmt == 2) || (c0 > c1);
+            for (int ch = 0; ch < 3; ++ch) {
+                if (quatro) {
+                    col[2][ch] = (uint8_t)((2 * col[0][ch] + col[1][ch]) / 3);
+                    col[3][ch] = (uint8_t)((col[0][ch] + 2 * col[1][ch]) / 3);
+                } else {
+                    col[2][ch] = (uint8_t)((col[0][ch] + col[1][ch]) / 2);
+                    col[3][ch] = 0;
+                }
+            }
+            col[0][3] = col[1][3] = col[2][3] = 255;
+            col[3][3] = quatro ? 255 : 0;
+            for (uint32_t i = 0; i < 16; ++i) {
+                const uint32_t k = (idx >> (2 * i)) & 3;
+                uint8_t *p = dst + (((by * 4 + (i >> 2)) * w) + bx * 4 + (i & 3)) * 4;
+                p[0] = col[k][0]; p[1] = col[k][1]; p[2] = col[k][2];
+                p[3] = (fmt == 2) ? alpha[i] : col[k][3];
+            }
+        }
+    }
 }
 
 /* ---- tex.pak: um unico arquivo com todas as texturas HD ----------------
@@ -577,7 +654,8 @@ static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_
    de volta nos .tex soltos em game:\tex\XX\. */
 #define X360_PAK_MAGIC 0x4844504Bu   /* "HDPK" */
 
-struct X360PakEntry { uint32_t hash, off, size, w, h; };
+struct X360PakEntry { uint32_t hash, off, size, w, h, fmt; };
+static uint32_t x360_pak_last_fmt, x360_pak_last_size;
 static HANDLE x360_pak_file = INVALID_HANDLE_VALUE;
 static struct X360PakEntry *x360_pak_index;
 static uint32_t x360_pak_count;
@@ -604,7 +682,11 @@ static void x360_pak_open(void) {
         x360_be32(head) != X360_PAK_MAGIC) { CloseHandle(f); return; }
     uint32_t count = x360_be32(head + 8);
     if (!count || count > 65536) { CloseHandle(f); return; }
-    uint32_t bytes = count * 20;
+    /* versao 1: 20 bytes por entrada (so RGBA32); versao 2: 24 bytes, com o
+       formato de cada textura (RGBA32/DXT1/DXT5). */
+    const uint32_t versao = x360_be32(head + 4);
+    const uint32_t esz = (versao >= 2) ? 24u : 20u;
+    uint32_t bytes = count * esz;
     uint8_t *raw = (uint8_t *)malloc(bytes);
     if (!raw) { CloseHandle(f); return; }
     if (!ReadFile(f, raw, bytes, &got, NULL) || got != bytes) {
@@ -613,12 +695,13 @@ static void x360_pak_open(void) {
     x360_pak_index = (struct X360PakEntry *)malloc(count * sizeof(struct X360PakEntry));
     if (!x360_pak_index) { free(raw); CloseHandle(f); return; }
     for (uint32_t i = 0; i < count; ++i) {
-        const uint8_t *e = raw + i * 20;
+        const uint8_t *e = raw + i * esz;
         x360_pak_index[i].hash = x360_be32(e);
         x360_pak_index[i].off  = x360_be32(e + 4);
         x360_pak_index[i].size = x360_be32(e + 8);
         x360_pak_index[i].w    = x360_be32(e + 12);
         x360_pak_index[i].h    = x360_be32(e + 16);
+        x360_pak_index[i].fmt  = (esz >= 24) ? x360_be32(e + 20) : 0;
     }
     free(raw);
     x360_pak_count = count;
@@ -658,13 +741,23 @@ static bool x360_pak_read(uint32_t hash, uint32_t *w, uint32_t *h) {
             if (x360_pak_index[i].hash == hash) { e = &x360_pak_index[i]; break; }
     }
     if (e) {
-        if (!e->w || !e->h || e->w > 2048 || e->h > 2048) return false;
-        if (e->size != e->w * e->h * 4) return false;
+        if (!e->w || !e->h || e->w > 2048 || e->h > 2048 || e->fmt > 2) return false;
+        if (!e->size || e->size != x360_dxt_size(e->w, e->h, e->fmt)) return false;
         if (SetFilePointer(x360_pak_file, (LONG)e->off, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER)
             return false;
         DWORD got = 0;
-        if (!ReadFile(x360_pak_file, x360_hd_buf, e->size, &got, NULL) || got != e->size)
+        /* RGBA vai direto para x360_hd_buf; DXT e lido comprimido e
+           descomprimido para x360_hd_buf (os dados comprimidos ficam em
+           x360_dxt_raw para o cache em RAM). */
+        uint8_t *dest = (e->fmt == 0) ? x360_hd_buf : x360_dxt_raw;
+        if (e->size > ((e->fmt == 0) ? sizeof(x360_hd_buf) : sizeof(x360_dxt_raw)))
             return false;
+        if (!ReadFile(x360_pak_file, dest, e->size, &got, NULL) || got != e->size)
+            return false;
+        if (e->fmt != 0)
+            x360_dxt_decode(x360_dxt_raw, e->w, e->h, e->fmt, x360_hd_buf);
+        x360_pak_last_fmt = e->fmt;
+        x360_pak_last_size = e->size;
         *w = e->w; *h = e->h;
         return true;
     }
@@ -680,7 +773,13 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
         x360_hdram[slot].last_used = ++x360_hdram_clock;
         ++x360_st_ramhit; ++x360_st_up;
         x360_st_upkb += (x360_hdram[slot].w * x360_hdram[slot].h * 4) >> 10;
-        gfx_rapi->upload_texture(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h);
+        if (x360_hdram[slot].fmt != 0) {
+            x360_dxt_decode(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h,
+                            x360_hdram[slot].fmt, x360_hd_buf);
+            gfx_rapi->upload_texture(x360_hd_buf, x360_hdram[slot].w, x360_hdram[slot].h);
+        } else {
+            gfx_rapi->upload_texture(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h);
+        }
         return true;
     }
 
@@ -689,7 +788,11 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
         uint32_t pw = 0, ph = 0;
         if (x360_pak_read(hash, &pw, &ph)) {
             ++x360_st_pak; ++x360_st_up; x360_st_upkb += (pw * ph * 4) >> 10;
-            x360_hdram_store(hash, pw, ph, x360_hd_buf, pw * ph * 4);
+            if (x360_pak_last_fmt != 0)   /* guarda o COMPRIMIDO: cabe muito mais */
+                x360_hdram_store_fmt(hash, pw, ph, x360_dxt_raw, x360_pak_last_size,
+                                     (uint8_t)x360_pak_last_fmt);
+            else
+                x360_hdram_store(hash, pw, ph, x360_hd_buf, pw * ph * 4);
             gfx_rapi->upload_texture(x360_hd_buf, pw, ph);
             x360_hdtex_remember(hash, X360_HDTEX_ST_HIT);
             return true;
@@ -1504,7 +1607,13 @@ static void import_texture(int tile) {
            MB/s), cada um criando uma textura nova -- o que travava a selecao
            de personagens depois de uma corrida, com a memoria de video cheia.
            Se a GPU ja tem exatamente esta textura HD neste no, nao reenvia. */
-        if (node->x360_hd_loaded != 0 && node->x360_hd_loaded == hd_hash) {
+        /* Tambem aceita o hash logico (sem a linha extra do G_LOADTILE
+           inclusivo): faixas encontradas por ele seriam reenviadas a GPU a
+           cada quadro se so o hash completo -- que muda com o "lixo" depois
+           da imagem -- fosse comparado. */
+        if (node->x360_hd_loaded != 0 &&
+            (node->x360_hd_loaded == hd_hash ||
+             (hd_logical_hash != 0 && node->x360_hd_loaded == hd_logical_hash))) {
             return;
         }
         bool hd_found = x360_try_load_hd_texture(hd_hash);
@@ -1532,7 +1641,7 @@ static void import_texture(int tile) {
 
             if (ok_slot >= 0) {
                 x360_hdram[ok_slot].last_used = ++x360_hdram_clock;
-                ok_pixels = x360_hdram[ok_slot].data;
+                ok_pixels = x360_hdram[ok_slot].fmt ? NULL : x360_hdram[ok_slot].data;
                 ok_w = x360_hdram[ok_slot].w;
                 ok_h = x360_hdram[ok_slot].h;
             } else {
@@ -1542,7 +1651,7 @@ static void import_texture(int tile) {
                     ok_slot = x360_hdram_find(ok_full_hash);
                     if (ok_slot >= 0) {
                         x360_hdram[ok_slot].last_used = ++x360_hdram_clock;
-                        ok_pixels = x360_hdram[ok_slot].data;
+                        ok_pixels = x360_hdram[ok_slot].fmt ? NULL : x360_hdram[ok_slot].data;
                         ok_w = x360_hdram[ok_slot].w;
                         ok_h = x360_hdram[ok_slot].h;
                     }

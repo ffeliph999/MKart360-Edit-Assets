@@ -24,7 +24,11 @@ compiled game assets.
   - diagnostic trace disabled by default (`X360_HDTEX_TRACE 0`), with a
     menu mode (`X360_HDTEX_TRACE_MENU`) that also logs each piece's position;
   - the HD hook no longer overwrites the texture cache's content hash —
-    this fixed flickering on menu textures loaded in blocks.
+    this fixed flickering on menu textures loaded in blocks;
+  - optional **DXT1/DXT5 compression** inside `tex.pak` (see
+    [Compressed tex.pak](#compressed-texpak-dxt-optional)), decoded on the
+    console before the texture is sent to the GPU. Older uncompressed
+    `tex.pak` files are still read normally.
   - `x360_try_draw_hd_menu_quad` already exists in the code but is
     **inactive** (not called yet) — reserved for a future replacement of
     the large menu textures.
@@ -36,7 +40,10 @@ compiled game assets.
 
 ### Known limitations
 
--High-resolution textures (higher than HQ) can overload the Xbox 360 hardware and cause crashes or performance issues; HD support exists but is limited to the console's hardware.
+- High-resolution textures (higher than HQ) can overload the Xbox 360 hardware and cause crashes or performance issues; HD support exists but is limited to the console's hardware.
+- DXT compression is lossy: it shrinks `tex.pak` a lot, but can add visible
+  grain/banding and small color shifts (see
+  [Compressed tex.pak](#compressed-texpak-dxt-optional)).
 
 ---
 
@@ -169,6 +176,7 @@ Generates `tex\tex.pak`, a single file with everything bundled inside.
 | `--only PREFIX` | Limits to a subset, e.g. `--only karts\bowser` |
 | `--out FOLDER` | Output folder (default `tex`) |
 | `--max N` | Skips images larger than N pixels (default 2048) |
+| `--dxt` | With `--pak`: stores textures compressed as DXT1/DXT5 (see below) |
 
 Without `--pak`, thousands of loose `.tex` files are generated — it works,
 but loads more slowly and is more fragile to transfer; use it only for
@@ -188,6 +196,34 @@ tex.pak          <- here, NOT inside a tex\ folder
 
 Swapping textures doesn't require recompiling — `tex.pak` is read at
 runtime. Recompiling is only needed when you change C code.
+
+### Compressed tex.pak (DXT, optional)
+
+```powershell
+pip install numpy
+py .\PACK_TEXTURES.py --pak --dxt
+```
+
+Each texture is stored as **DXT1** (opaque or on/off transparency, ~8× smaller
+than RGBA) or **DXT5** (smooth transparency, ~4× smaller). The console reads
+less from disk and fits more textures in its RAM cache; the data is
+decompressed by the CPU before being sent to the GPU.
+
+Limitations:
+
+- **Lossy.** Gradients may show grain or banding, and sprites can get small
+  color shifts (e.g. lighter edges). Compare with and without `--dxt` and
+  keep whichever looks better to you.
+- **It does not remove loading hitches.** Testing showed the first-time
+  stutters in menus and in texture-heavy courses are caused by the *number*
+  of disk reads, not their size — DXT makes each read smaller, not fewer.
+- **GPU memory is unchanged:** textures still reach the GPU as RGBA, so
+  video memory use is the same as without compression.
+- Textures whose width or height is not a multiple of 4, and the menu "OK"
+  button texture, are always stored uncompressed.
+- A compressed `tex.pak` **requires the updated `gfx_pc.c`**; older builds
+  can't read it. The updated build reads both compressed and uncompressed
+  packs.
 
 ### Memory limits
 

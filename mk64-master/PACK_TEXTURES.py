@@ -161,12 +161,110 @@ def _diagnose_yoshi(indir, generated):
             print(f"    [{i}] ({t.get('x0',0)},{t.get('y0',0)})-({t.get('x1',e.get('width'))},{t.get('y1')}) hash={t.get('hash')}")
 
 
+
+# ---- Compressao DXT (opcao --dxt) -----------------------------------------
+# DXT1 (8 bytes / bloco 4x4) para texturas opacas ou com transparencia
+# binaria; DXT5 (16 bytes / bloco) quando ha transparencia gradual. O jogo
+# descomprime no console antes do envio a GPU; o ganho e ler 4-8x menos do
+# disco e caber 4-8x mais texturas no cache em RAM.
+# Texturas fora desta compressao (continuam RGBA32):
+#   - largura/altura que nao sejam multiplos de 4;
+#   - DFF91B13 (botao OK): o gfx_pc.c recorta seus pixels direto do cache.
+DXT_NUNCA = {"dff91b13"}
+
+
+def _expand565(c):
+    import numpy as np
+    r = (c >> 11) & 31; g = (c >> 5) & 63; b = c & 31
+    return np.stack([(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)], -1).astype(np.int32)
+
+
+def _pack565(rgb):
+    import numpy as np
+    rgb = np.clip(rgb, 0, 255)
+    r = np.rint(rgb[..., 0] * 31 / 255).astype(np.uint32)
+    g = np.rint(rgb[..., 1] * 63 / 255).astype(np.uint32)
+    b = np.rint(rgb[..., 2] * 31 / 255).astype(np.uint32)
+    return (r << 11) | (g << 5) | b
+
+
+def _bloco_cor(px, opaco, modo3):
+    """px: (N,16,3) int32; opaco: (N,16) bool. Devolve (c0,c1,idx) uint32
+    usando exatamente a mesma paleta (inteira) do decodificador do console."""
+    import numpy as np
+    big = np.where(opaco[..., None], px, -1)
+    sml = np.where(opaco[..., None], px, 999)
+    mx = big.max(1).astype(np.float64); mn = sml.min(1).astype(np.float64)
+    vazio = ~opaco.any(1)
+    mx[vazio] = 0; mn[vazio] = 0
+    inset = (mx - mn) / 16.0
+    a = _pack565(mx - inset); b = _pack565(mn + inset)
+    if modo3:   # 3 cores + transparente: exige c0 <= c1
+        c0 = np.minimum(a, b); c1 = np.maximum(a, b)
+    else:       # 4 cores: exige c0 > c1 (iguais -> indice 0 em tudo)
+        c0 = np.maximum(a, b); c1 = np.minimum(a, b)
+    e0 = _expand565(c0); e1 = _expand565(c1)
+    if modo3:
+        pal = np.stack([e0, e1, (e0 + e1) // 2], 1)                    # (N,3,3)
+    else:
+        pal = np.stack([e0, e1, (2 * e0 + e1) // 3, (e0 + 2 * e1) // 3], 1)
+    d = ((px[:, :, None, :] - pal[:, None, :, :]) ** 2).sum(-1)       # (N,16,k)
+    idx = d.argmin(-1).astype(np.uint32)
+    if modo3:
+        idx = np.where(opaco, idx, 3)
+    else:
+        idx = np.where((c0 == c1)[:, None], 0, idx)
+    return c0, c1, idx
+
+
+def dxt_encode(raw, w, h):
+    """Devolve (fmt, bytes) com fmt 1 = DXT1, 2 = DXT5."""
+    import numpy as np
+    a = np.frombuffer(raw, np.uint8).reshape(h, w, 4).astype(np.int32)
+    blk = a.reshape(h // 4, 4, w // 4, 4, 4).transpose(0, 2, 1, 3, 4).reshape(-1, 16, 4)
+    alfa = blk[..., 3]
+    if alfa.min() >= 250:
+        fmt, modo3 = 1, False
+        opaco = np.ones(alfa.shape, bool)
+    elif ((alfa <= 8) | (alfa >= 247)).all():
+        fmt, modo3 = 1, True
+        opaco = alfa >= 128
+    else:
+        fmt, modo3 = 2, False
+        opaco = np.ones(alfa.shape, bool)
+    c0, c1, idx = _bloco_cor(blk[..., :3], opaco, modo3)
+    sh2 = (np.arange(16, dtype=np.uint32) * 2)
+    idx32 = (idx << sh2).sum(1).astype(np.uint32)
+    cor = np.zeros((blk.shape[0], 8), np.uint8)
+    cor[:, 0] = c0 & 255; cor[:, 1] = c0 >> 8
+    cor[:, 2] = c1 & 255; cor[:, 3] = c1 >> 8
+    for k in range(4):
+        cor[:, 4 + k] = (idx32 >> (8 * k)) & 255
+    if fmt == 1:
+        return 1, cor.tobytes()
+    a0 = alfa.max(1); a1 = alfa.min(1)
+    k = np.arange(1, 7)
+    palA = np.concatenate([a0[:, None], a1[:, None],
+                           ((7 - k)[None, :] * a0[:, None] + k[None, :] * a1[:, None]) // 7], 1)
+    dA = np.abs(alfa[:, :, None] - palA[:, None, :])
+    aidx = dA.argmin(-1).astype(np.uint64)
+    aidx = np.where((a0 == a1)[:, None], 0, aidx)
+    bits = (aidx << (np.arange(16, dtype=np.uint64) * 3)).sum(1).astype(np.uint64)
+    alfa_blk = np.zeros((blk.shape[0], 8), np.uint8)
+    alfa_blk[:, 0] = a0; alfa_blk[:, 1] = a1
+    for k2 in range(6):
+        alfa_blk[:, 2 + k2] = ((bits >> np.uint64(8 * k2)) & np.uint64(255)).astype(np.uint8)
+    return 2, np.concatenate([alfa_blk, cor], 1).tobytes()
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="indir", default="extracted_textures")
     ap.add_argument("--out", dest="outdir", default="tex")
     ap.add_argument("--max", type=int, default=2048)
     ap.add_argument("--only", help="so empacota PNGs cujo caminho relativo comeca com este prefixo")
+    ap.add_argument("--dxt", action="store_true",
+                    help="com --pak: comprime as texturas em DXT1/DXT5 (4-8x menor). "
+                         "Exige o gfx_pc.c com suporte a DXT.")
     ap.add_argument("--pak", action="store_true",
                     help="gera UM arquivo tex.pak em vez de milhares de .tex soltos. "
                          "Evita milhares de aberturas de arquivo em runtime (causa dos "
@@ -353,16 +451,33 @@ def main():
                 if y1e <= y0e: y1e = y0e + 1
                 y1e = min(y1e, img.size[1])
                 crop = img.crop((x0e, y0e, x1e, y1e))
-                # Sem trace, o ultimo tile pode conter a linha que o runtime
-                # le alem do fim da imagem. Nao inventamos esse hash: pulamos
-                # somente esse tile, mantendo todos os outros TKMK exatos.
-                if t.get("hash_source") == "computed" and int(t.get("y1", 0)) >= orig_h:
-                    continue
                 if crop.width > a.max or crop.height > a.max:
                     print(f"  ! {rel} TKMK runtime {i}: {crop.width}x{crop.height} excede --max={a.max}, pulando")
                     continue
-                write_tex(outdir, t["hash"], crop, f"{rel} [TKMK runtime {i}; {t.get('hash_source','computed')}]")
-                n_tiles += 1
+                # A ultima faixa le uma linha ALEM do fim da imagem (G_LOADTILE
+                # inclusivo): o hash completo inclui bytes de outra textura que
+                # estiver depois dela na memoria. Esse "lixo" muda quando o
+                # jogador entra em outro menu e volta, e a faixa de baixo
+                # passava a aparecer na versao original. O gfx_pc.c ja tenta um
+                # segundo hash sem a linha extra (logical_hash); gravamos a faixa
+                # tambem sob ele, para essa tentativa de reserva encontrar a HD.
+                hash_full = t.get("hash")
+                hash_logico = t.get("logical_hash")
+                borda_sem_trace = (t.get("hash_source") == "computed"
+                                   and int(t.get("y1", 0)) >= orig_h)
+                gravou = False
+                # Sem trace, o hash completo da borda depende de bytes que nao
+                # conhecemos: nao o inventamos, so usamos o logico.
+                if hash_full and not borda_sem_trace:
+                    write_tex(outdir, hash_full, crop,
+                              f"{rel} [TKMK runtime {i}; {t.get('hash_source','computed')}]")
+                    gravou = True
+                if hash_logico and hash_logico != hash_full:
+                    write_tex(outdir, hash_logico, crop,
+                              f"{rel} [TKMK runtime {i}; logical]")
+                    gravou = True
+                if gravou:
+                    n_tiles += 1
             n_files += 1
             continue
 
@@ -489,18 +604,94 @@ def main():
         write_tex(outdir, h, img)
         n_files += 1
 
+    # Blocos usados durante a ANIMACAO DE GIRO das imagens TKMK00 (selecao de
+    # modo, nomes dos personagens), medidos por SCAN_TKMK_ANIM.py. Para girar,
+    # o jogo desenha a imagem em blocos com outros recortes -- outros hashes --
+    # e sem isto a animacao aparecia na versao original.
+    anim_path = indir / "texture_tkmk00_anim_manifest.json"
+    if not anim_path.is_file():
+        anim_path = (Path(__file__).resolve().parent / "manifest_runtime"
+                     / "texture_tkmk00_anim_manifest.json")
+    if anim_path.is_file():
+        n_anim = 0
+        for e in load_manifest(anim_path):
+            png = indir / e.get("png", "")
+            tiles = e.get("tiles") or []
+            if not png.is_file() or not tiles:
+                continue
+            img_a = Image.open(png).convert("RGBA")
+            wa, ha = img_a.size
+            W, H = int(e["width"]), int(e["height"])
+            # blocos que passam da borda: estende repetindo a ultima linha/coluna
+            need_w = max(wa, round(max(int(t["x1"]) for t in tiles) / W * wa))
+            need_h = max(ha, round(max(int(t["y1"]) for t in tiles) / H * ha))
+            if need_w > wa or need_h > ha:
+                ext = Image.new("RGBA", (need_w, need_h))
+                ext.paste(img_a, (0, 0))
+                if need_h > ha:
+                    ultima = img_a.crop((0, ha - 1, wa, ha))
+                    for yy in range(ha, need_h):
+                        ext.paste(ultima, (0, yy))
+                if need_w > wa:
+                    col = ext.crop((wa - 1, 0, wa, need_h))
+                    for xx in range(wa, need_w):
+                        ext.paste(col, (xx, 0))
+                img_a = ext
+            for i, t in enumerate(tiles):
+                x0e = round(int(t["x0"]) / W * wa); x1e = round(int(t["x1"]) / W * wa)
+                y0e = round(int(t["y0"]) / H * ha); y1e = round(int(t["y1"]) / H * ha)
+                x1e = max(x1e, x0e + 1); y1e = max(y1e, y0e + 1)
+                crop = img_a.crop((x0e, y0e, min(x1e, img_a.size[0]), min(y1e, img_a.size[1])))
+                if crop.width > a.max or crop.height > a.max:
+                    continue
+                gravados = set()
+                for chave in (t.get("hash"), t.get("logical_hash")):
+                    if chave and chave not in gravados:
+                        write_tex(outdir, chave, crop, f"{e.get('png')} [TKMK anim {i}]")
+                        gravados.add(chave)
+                if gravados:
+                    n_anim += 1
+        print(f"Blocos de animacao TKMK00: {n_anim} ({anim_path.name})")
+
     if PAK_MODE:
         # tex.pak: cabecalho + indice + dados. Um unico arquivo, aberto uma vez
         # pelo jogo; cada textura vira um seek+read em vez de abrir arquivo.
         pak = outdir / "tex.pak"
-        header = struct.pack(">III", PAK_MAGIC, 1, len(PAK_ENTRIES))
-        index_size = len(PAK_ENTRIES) * 20
-        data_off = len(header) + index_size
-        index, blob, cur = b"", [], data_off
-        for hh, w, h, raw in PAK_ENTRIES:
-            index += struct.pack(">IIIII", int(hh, 16), cur, len(raw), w, h)
-            blob.append(raw)
-            cur += len(raw)
+        if a.dxt:
+            try:
+                import numpy  # noqa: F401
+            except ImportError:
+                sys.exit("--dxt precisa do numpy: pip install numpy")
+            # versao 2: 24 bytes por entrada, com o formato de cada textura
+            header = struct.pack(">III", PAK_MAGIC, 2, len(PAK_ENTRIES))
+            index_size = len(PAK_ENTRIES) * 24
+            data_off = len(header) + index_size
+            index, blob, cur = b"", [], data_off
+            cont = {0: 0, 1: 0, 2: 0}
+            antes = depois = 0
+            print(f"comprimindo {len(PAK_ENTRIES)} texturas em DXT...")
+            for n_i, (hh, w, h, raw) in enumerate(PAK_ENTRIES, 1):
+                fmt, dados = 0, raw
+                if w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
+                    fmt, dados = dxt_encode(raw, w, h)
+                cont[fmt] += 1
+                antes += len(raw); depois += len(dados)
+                index += struct.pack(">IIIIII", int(hh, 16), cur, len(dados), w, h, fmt)
+                blob.append(dados)
+                cur += len(dados)
+                if n_i % 1000 == 0:
+                    print(f"  {n_i}/{len(PAK_ENTRIES)}")
+            print(f"DXT: {cont[1]} DXT1, {cont[2]} DXT5, {cont[0]} sem compressao "
+                  f"| {antes/1024/1024:.0f} MB -> {depois/1024/1024:.0f} MB")
+        else:
+            header = struct.pack(">III", PAK_MAGIC, 1, len(PAK_ENTRIES))
+            index_size = len(PAK_ENTRIES) * 20
+            data_off = len(header) + index_size
+            index, blob, cur = b"", [], data_off
+            for hh, w, h, raw in PAK_ENTRIES:
+                index += struct.pack(">IIIII", int(hh, 16), cur, len(raw), w, h)
+                blob.append(raw)
+                cur += len(raw)
         with open(pak, "wb") as f:
             f.write(header); f.write(index)
             for b in blob:
