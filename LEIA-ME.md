@@ -48,6 +48,7 @@ sem modificar a ROM nem os assets compilados do jogo.
 - Texturas em resolução muito alta (acima de HQ) podem sobrecarregar o
   hardware do Xbox 360 e causar travamentos ou problemas de desempenho; o
   suporte a HD existe, mas é limitado ao hardware do console.
+- Foi descoberto que ao executar o jogo com um tex.pak em discos rígidos mecânicos sejam internos ou externos pode causar pequenos travamentos durante o jogo, o desempenho pode variar, recomenda-se o uso de pen drives ou SSDs.
 - A compressão DXT tem perda: ela reduz muito o `tex.pak`, mas pode deixar
   granulação/faixas visíveis e pequenas alterações de cor (veja
   [tex.pak comprimido](#texpak-comprimido-dxt-opcional)).
