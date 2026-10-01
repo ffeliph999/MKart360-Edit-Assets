@@ -608,50 +608,54 @@ def main():
     # modo, nomes dos personagens), medidos por SCAN_TKMK_ANIM.py. Para girar,
     # o jogo desenha a imagem em blocos com outros recortes -- outros hashes --
     # e sem isto a animacao aparecia na versao original.
-    anim_path = indir / "texture_tkmk00_anim_manifest.json"
-    if not anim_path.is_file():
-        anim_path = (Path(__file__).resolve().parent / "manifest_runtime"
-                     / "texture_tkmk00_anim_manifest.json")
-    if anim_path.is_file():
-        n_anim = 0
-        for e in load_manifest(anim_path):
-            png = indir / e.get("png", "")
-            tiles = e.get("tiles") or []
-            if not png.is_file() or not tiles:
-                continue
-            img_a = Image.open(png).convert("RGBA")
-            wa, ha = img_a.size
-            W, H = int(e["width"]), int(e["height"])
-            # blocos que passam da borda: estende repetindo a ultima linha/coluna
-            need_w = max(wa, round(max(int(t["x1"]) for t in tiles) / W * wa))
-            need_h = max(ha, round(max(int(t["y1"]) for t in tiles) / H * ha))
-            if need_w > wa or need_h > ha:
-                ext = Image.new("RGBA", (need_w, need_h))
-                ext.paste(img_a, (0, 0))
-                if need_h > ha:
-                    ultima = img_a.crop((0, ha - 1, wa, ha))
-                    for yy in range(ha, need_h):
-                        ext.paste(ultima, (0, yy))
-                if need_w > wa:
-                    col = ext.crop((wa - 1, 0, wa, need_h))
-                    for xx in range(wa, need_w):
-                        ext.paste(col, (xx, 0))
-                img_a = ext
-            for i, t in enumerate(tiles):
-                x0e = round(int(t["x0"]) / W * wa); x1e = round(int(t["x1"]) / W * wa)
-                y0e = round(int(t["y0"]) / H * ha); y1e = round(int(t["y1"]) / H * ha)
-                x1e = max(x1e, x0e + 1); y1e = max(y1e, y0e + 1)
-                crop = img_a.crop((x0e, y0e, min(x1e, img_a.size[0]), min(y1e, img_a.size[1])))
-                if crop.width > a.max or crop.height > a.max:
+    # Le tambem texture_tkmk00_tinted_manifest.json (fundos coloridos dos menus,
+    # gerados pelo TINT_MENU_BACKGROUNDS.py), no mesmo formato.
+    for _nome_man in ("texture_tkmk00_anim_manifest.json",
+                      "texture_tkmk00_tinted_manifest.json"):
+        anim_path = indir / _nome_man
+        if not anim_path.is_file():
+            anim_path = (Path(__file__).resolve().parent / "manifest_runtime"
+                         / _nome_man)
+        if anim_path.is_file():
+            n_anim = 0
+            for e in load_manifest(anim_path):
+                png = indir / e.get("png", "")
+                tiles = e.get("tiles") or []
+                if not png.is_file() or not tiles:
                     continue
-                gravados = set()
-                for chave in (t.get("hash"), t.get("logical_hash")):
-                    if chave and chave not in gravados:
-                        write_tex(outdir, chave, crop, f"{e.get('png')} [TKMK anim {i}]")
-                        gravados.add(chave)
-                if gravados:
-                    n_anim += 1
-        print(f"Blocos de animacao TKMK00: {n_anim} ({anim_path.name})")
+                img_a = Image.open(png).convert("RGBA")
+                wa, ha = img_a.size
+                W, H = int(e["width"]), int(e["height"])
+                # blocos que passam da borda: estende repetindo a ultima linha/coluna
+                need_w = max(wa, round(max(int(t["x1"]) for t in tiles) / W * wa))
+                need_h = max(ha, round(max(int(t["y1"]) for t in tiles) / H * ha))
+                if need_w > wa or need_h > ha:
+                    ext = Image.new("RGBA", (need_w, need_h))
+                    ext.paste(img_a, (0, 0))
+                    if need_h > ha:
+                        ultima = img_a.crop((0, ha - 1, wa, ha))
+                        for yy in range(ha, need_h):
+                            ext.paste(ultima, (0, yy))
+                    if need_w > wa:
+                        col = ext.crop((wa - 1, 0, wa, need_h))
+                        for xx in range(wa, need_w):
+                            ext.paste(col, (xx, 0))
+                    img_a = ext
+                for i, t in enumerate(tiles):
+                    x0e = round(int(t["x0"]) / W * wa); x1e = round(int(t["x1"]) / W * wa)
+                    y0e = round(int(t["y0"]) / H * ha); y1e = round(int(t["y1"]) / H * ha)
+                    x1e = max(x1e, x0e + 1); y1e = max(y1e, y0e + 1)
+                    crop = img_a.crop((x0e, y0e, min(x1e, img_a.size[0]), min(y1e, img_a.size[1])))
+                    if crop.width > a.max or crop.height > a.max:
+                        continue
+                    gravados = set()
+                    for chave in (t.get("hash"), t.get("logical_hash")):
+                        if chave and chave not in gravados:
+                            write_tex(outdir, chave, crop, f"{e.get('png')} [TKMK anim {i}]")
+                            gravados.add(chave)
+                    if gravados:
+                        n_anim += 1
+            print(f"Blocos TKMK00 extras: {n_anim} ({anim_path.name})")
 
     if PAK_MODE:
         # tex.pak: cabecalho + indice + dados. Um unico arquivo, aberto uma vez
