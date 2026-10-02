@@ -148,5 +148,4 @@ hdtex-stats*.log
 *.bak
 *.BAK
 gfx_pc_MEDIR_*.c
-EXPERIMENTO_60FPS*.py
 IMPORTAR_PACK_HD.py
