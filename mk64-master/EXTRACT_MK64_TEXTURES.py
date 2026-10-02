@@ -16,6 +16,14 @@ Versão Final Otimizada e Corrigida com Suporte Completo ao Lakitu:
   8. Manifest separado para TKMK00, incluindo hash dos pixels RGBA16 decodificados
      e hash de cada tile de 4KB realmente carregado pelo RDP.
 
+  9. Fluxo integrado de fundos coloridos de menu HD: na primeira execução,
+     preserva os fundos originais em extracted_textures\originais; nas
+     execuções seguintes detecta a arte HD, pergunta se deve gerar os fundos
+     rosa/verde/azul e reproduz a mesma lógica matemática do jogo.
+ 10. Todos os arquivos de manifest_runtime são sincronizados para
+     extracted_textures, para que o PACK_TEXTURES.py encontre os manifests
+     junto dos PNGs sem etapa manual.
+
 Uso (dentro de mk64-master):
     py .\EXTRACT_MK64_TEXTURES.py --rom .\baserom.br.z64 --region br
     py .\EXTRACT_MK64_TEXTURES.py --rom .\baserom.us.z64 --region us
@@ -24,6 +32,7 @@ Uso (dentro de mk64-master):
 from pathlib import Path
 import argparse, hashlib, json, re, struct, sys, zlib
 from collections import defaultdict
+import shutil
 
 # ---------------------------------------------------------------- Configuração global
 
@@ -76,6 +85,13 @@ def source_bytes(rom, offset, cache, raw_size=None):
 # ---------------------------------------------------------------- PNG (puro, sem PIL)
 
 def write_png(path, w, h, rgba, overwrite=True):
+    # Os fundos de menu podem ser substituídos por arte HD entre duas
+    # execuções. Nunca sobrescreva uma imagem que já tenha dimensões HD.
+    if (path.is_file() and path.name in ("background_blue_sky.png", "background_sunset.png")
+            and "generated" in path.parts and "texture_tkmk00" in path.parts):
+        old_size = _png_size(path)
+        if old_size and old_size != (w, h):
+            return
     if not overwrite and path.is_file() and path.stat().st_size > 0:
         return
     def chunk(tag, data):
@@ -2308,6 +2324,471 @@ def canonicalize_common_hash_aliases(outdir):
     (outdir / "texture_alias_manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
+
+# ---------------------------------------------------------------- Fundos HD dos menus (integrado do GERAR_FUNDOS_MENU_HD/TINT_MENU_BACKGROUNDS)
+
+MENU_FUNDOS = ("background_blue_sky", "background_sunset")
+MENU_CORES = {
+    "modo": (0xFF, 0xAF, 0xAF),
+    "personagem": (0xAF, 0xFF, 0xAF),
+    "pista": (0xAF, 0xAF, 0xFF),
+}
+MENU_GREY_ARG = 0x19
+
+
+def _png_size(path):
+    """Retorna (W,H) de um PNG sem exigir Pillow."""
+    try:
+        with path.open("rb") as f:
+            if f.read(8) != b"\x89PNG\r\n\x1a\n":
+                return None
+            if f.read(4) != b"\x00\x00\x00\r":
+                return None
+            if f.read(4) != b"IHDR":
+                return None
+            import struct as _struct
+            data = f.read(8)
+            if len(data) != 8:
+                return None
+            return _struct.unpack(">II", data)
+    except (OSError, ValueError):
+        return None
+
+
+def _menu_manifest_info(outdir):
+    p = outdir / "texture_tkmk00_manifest.json"
+    if not p.is_file():
+        return {}
+    try:
+        return {e.get("symbol"): e for e in json.loads(p.read_text(encoding="utf-8"))
+                if e.get("symbol")}
+    except Exception:
+        return {}
+
+
+def preserve_menu_originals_before_extraction(root, outdir):
+    """
+    Guarda os fundos originais antes de uma nova extração. Isso permite que
+    a segunda execução use a ROM original mesmo depois que o PNG da pasta
+    principal tiver sido substituído pela arte HD.
+    """
+    manifest = _menu_manifest_info(outdir)
+    for fundo in MENU_FUNDOS:
+        entry = manifest.get(fundo, {})
+        rel = entry.get("png") or f"generated/texture_tkmk00/{fundo}.png"
+        src = outdir / rel
+        if not src.is_file():
+            continue
+        expected = (int(entry.get("width", 0)), int(entry.get("height", 0)))
+        if not expected[0]:
+            expected = (320, 240)
+        size = _png_size(src)
+        if size != expected:
+            # Já é uma arte HD/editada; nunca use essa imagem como "original".
+            continue
+        backup = outdir / "originais" / rel
+        if not backup.is_file() and size:
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, backup)
+
+
+
+def extract_tkmk00_originals_only(root, rom, outdir, region="us"):
+    """Na segunda execução, extrai SOMENTE os TKMK00 para extracted_textures/originais.
+
+    Nunca escreve em extracted_textures/generated, karts, lakitu ou qualquer outra
+    pasta que contenha arte editada pelo usuário. Os PNGs daqui são a referência
+    original da ROM usada pela etapa de geração dos backgrounds HD.
+    """
+    dest_root = outdir / "originais" / "generated" / "texture_tkmk00"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    helper = find_tkmk_helper(root)
+    if helper is None:
+        print("  ! TKMK00: helper não encontrado/compilável; originais não atualizados.")
+        return 0
+    entries = load_tkmk_asset_entries(root, region)
+    if not entries:
+        print("  ! TKMK00: nenhum asset encontrado em assets.json.")
+        return 0
+    count = 0
+    cache = {}
+    for entry in entries:
+        dst = dest_root / f"{entry['symbol']}.png"
+        try:
+            source = source_bytes(rom, int_value(entry["rom_offset"]), cache, int_value(entry["size"]))
+            # Originais são sempre reconstruídos da ROM, mas somente dentro de
+            # extracted_textures/originais; a árvore editada nunca é tocada.
+            extract_tkmk00_texture(root, source, helper, dst, entry["alpha_color"], overwrite=True)
+            count += 1
+        except Exception as exc:
+            print(f"  ! TKMK00 original: {entry['symbol']}: {exc}")
+    print(f"  TKMK00 originais extraídos: {count} -> {dest_root}")
+    return count
+
+def menu_background_relpaths(root, outdir):
+    manifest = _menu_manifest_info(outdir)
+    result = {}
+    for fundo in MENU_FUNDOS:
+        e = manifest.get(fundo, {})
+        rel = e.get("png")
+        if rel:
+            result[fundo] = (rel, int(e.get("width", 0)), int(e.get("height", 0)))
+    return result
+
+
+def menu_hd_exists(outdir):
+    """True quando pelo menos um fundo já foi substituído por uma arte maior."""
+    for fundo, (rel, w, h) in menu_background_relpaths(None, outdir).items():
+        p = outdir / rel
+        if p.is_file() and w and h:
+            size = _png_size(p)
+            if size and size != (w, h):
+                return True
+    return False
+
+
+def menu_original_backup(outdir, rel, w, h):
+    """Localiza somente o original preservado, nunca a arte HD atual."""
+    backup = outdir / "originais" / rel
+    if backup.is_file() and _png_size(backup) == (w, h):
+        return backup
+
+    # Compatibilidade com a base anterior, que usava extracted_originais.
+    legacy_root = outdir.parent / "extracted_originais"
+    legacy = legacy_root / rel
+    if legacy.is_file() and _png_size(legacy) == (w, h):
+        # Migra silenciosamente para a nova pasta, evitando depender do
+        # GERAR_FUNDOS_MENU_HD.py nas próximas execuções.
+        try:
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy, backup)
+            return backup
+        except OSError:
+            return legacy
+
+    # Compatibilidade com uma eventual pasta _originais criada anteriormente.
+    legacy_current = outdir / rel
+    if legacy_current.is_file() and _png_size(legacy_current) == (w, h):
+        return legacy_current
+    return None
+
+
+def _menu_pow2(value, exponent):
+    if exponent >= 0:
+        base = 2.0
+    else:
+        exponent = -exponent
+        base = 0.5
+    while exponent != 0:
+        if exponent & 1:
+            value *= base
+        exponent >>= 1
+        base *= base
+    return value
+
+
+def _menu_normalize(x):
+    e = 0
+    while x < 0.5 or x >= 1.0:
+        if x < 0.5:
+            x *= 2.0
+            e -= 1
+        else:
+            x /= 2.0
+            e += 1
+    return x, e
+
+
+def _menu_ln(x):
+    if x <= 0.0:
+        return 0.0
+    _, sp38 = _menu_normalize(x / 1.414213562373095)
+    x /= _menu_pow2(1.0, sp38)
+    v = 1
+    x = (x - 1.0) / (x + 1.0)
+    t12 = x * x
+    f2 = x
+    while True:
+        v += 2
+        x *= t12
+        f0 = f2
+        f2 += x / float(v)
+        if f0 == f2:
+            break
+    return float(sp38) * 0.6931471805599453 + 2 * f2
+
+
+def _menu_exp(x):
+    t10 = int((0.5 if x >= 0.0 else -0.5) + (x / 0.6931471805599453))
+    x -= t10 * 0.6931471805599453
+    f2 = x * x
+    f0 = f2 / 22
+    for i in range(4):
+        f0 = f2 / ((18 - 4 * i) + f0)
+    f2 = 2 + f0
+    return _menu_pow2((f2 + x) / (f2 - x), t10)
+
+
+def _menu_pow(a, b):
+    if -2147483647.0 <= b <= 2147483647.0 and b == int(b):
+        r = 1.0
+        for _ in range(int(b)):
+            r *= a
+        return r
+    if a > 0.0:
+        return _menu_exp(_menu_ln(a) * b)
+    return 0.0
+
+
+def _menu_gray_table():
+    import numpy as np
+    exp_ = (MENU_GREY_ARG * 1.5 / 256.0) + 0.25
+    tab = np.array([_menu_pow(i / 32.0, exp_) for i in range(32)], dtype=np.float32)
+    nivel = (tab * np.float32(32.0)).astype(np.uint32)
+    return np.minimum(nivel, 31), exp_
+
+
+def _menu_tint_hd(img, cor):
+    import numpy as np
+    from PIL import Image
+    _, exp_ = _menu_gray_table()
+    a = np.asarray(img.convert("RGBA")).astype(np.float64)
+    r5, g5, b5 = a[..., 0] * 31 / 255, a[..., 1] * 31 / 255, a[..., 2] * 31 / 255
+    cinza = (r5 * 0x55 + g5 * 0x4B + b5 * 0x5F) / 256.0
+    t = np.minimum(np.power(np.clip(cinza / 32.0, 0, 1), exp_) * 32.0, 31.0)
+    out = np.empty_like(a)
+    for k in range(3):
+        out[..., k] = (t * cor[k] / 256.0) * 255 / 31
+    out[..., 3] = a[..., 3]
+    return Image.fromarray(np.clip(np.rint(out), 0, 255).astype(np.uint8), "RGBA")
+
+
+def _menu_png_to_rgba16(path, w, h):
+    import numpy as np
+    from PIL import Image
+    im = Image.open(path).convert("RGBA")
+    if im.size != (w, h):
+        return None
+    a = np.asarray(im).astype(np.uint32)
+    v = (np.rint(a[..., 0] * 31 / 255).astype(np.uint32) << 11) | \
+        (np.rint(a[..., 1] * 31 / 255).astype(np.uint32) << 6) | \
+        (np.rint(a[..., 2] * 31 / 255).astype(np.uint32) << 1) | \
+        (a[..., 3] >= 128)
+    return v.astype(">u2").tobytes()
+
+
+def _menu_tint_rgba16(raw, cor):
+    import numpy as np
+    nivel, _ = _menu_gray_table()
+    v = np.frombuffer(raw, dtype=">u2").astype(np.uint32)
+    r = ((v & 0xF800) >> 11) * 0x55
+    g = ((v & 0x07C0) >> 6) * 0x4B
+    b = ((v & 0x003E) >> 1) * 0x5F
+    a = v & 1
+    t = nivel[(r + g + b) // 256]
+    lum = (t * 0x4D + t * 0x96 + t * 0x1D) // 256
+    out = (((lum * cor[0]) // 256) << 11) + \
+          (((lum * cor[1]) // 256) << 6) + \
+          (((lum * cor[2]) // 256) << 1) + a
+    return out.astype(">u2").tobytes()
+
+
+def _menu_fnv1a32(data):
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def generate_hd_menu_backgrounds(root, outdir):
+    """
+    Equivalente interno do antigo TINT_MENU_BACKGROUNDS.py.
+    Usa os PNGs originais preservados em extracted_textures/originais e
+    a arte HD atualmente presente em extracted_textures.
+    """
+    try:
+        from PIL import Image
+        import numpy as np  # noqa: F401
+    except ImportError:
+        print("  ! Para gerar os fundos HD, instale Pillow e numpy: py -m pip install pillow numpy")
+        return False
+
+    imagens = _menu_manifest_info(outdir)
+    if not imagens:
+        print("  ! texture_tkmk00_manifest.json não encontrado; fundos não gerados.")
+        return False
+
+    layout, fonte = None, ""
+    anim_p = root / "manifest_runtime" / "texture_tkmk00_anim_manifest.json"
+    if anim_p.is_file():
+        try:
+            anim = {e["symbol"]: e for e in json.loads(anim_p.read_text(encoding="utf-8"))}
+            if len(anim.get("background_blue_sky", {}).get("tiles", [])) > 10:
+                layout, fonte = anim["background_blue_sky"]["tiles"], "medida"
+        except Exception:
+            pass
+
+    if layout is None:
+        rt_p = root / "manifest_runtime" / "texture_tkmk00_runtime_manifest.json"
+        if rt_p.is_file():
+            try:
+                for e in json.loads(rt_p.read_text(encoding="utf-8")):
+                    if e.get("symbol") == "background_blue_sky" and e.get("tmem_tiles_runtime"):
+                        layout = [dict(t, y1=t["y1"] + 1) for t in e["tmem_tiles_runtime"]
+                                  ]
+                        fonte = "eduardo"
+                        break
+            except Exception:
+                pass
+
+    if layout is None:
+        layout = [{"x0": 0, "y0": y, "x1": 320, "y1": y + 3}
+                  for y in range(0, 240, 2)]
+        fonte = "padrao"
+
+    print(f"  disposição dos blocos do fundo: {len(layout)} blocos "
+          f"({'medida com a sua ROM' if fonte == 'medida' else 'manifest do fork' if fonte == 'eduardo' else 'padrão embutido'})")
+
+    saida, resumo = [], []
+    for fundo in MENU_FUNDOS:
+        e = imagens.get(fundo)
+        if not e:
+            continue
+        W, H, rel = int(e["width"]), int(e["height"]), e["png"]
+        orig_path = menu_original_backup(outdir, rel, W, H)
+        if not orig_path:
+            print(f"  {fundo}: PNG original ({W}x{H}) não encontrado em extracted_textures/originais -- pulado")
+            continue
+
+        orig = _menu_png_to_rgba16(orig_path, W, H)
+        if not orig:
+            print(f"  {fundo}: não foi possível ler o PNG original -- pulado")
+            continue
+
+        if fundo == "background_blue_sky":
+            ok = tot = 0
+            for t in layout:
+                off = (t["y0"] * W + t["x0"]) * 2
+                L = (t["x1"] - t["x0"]) * (t["y1"] - t["y0"]) * 2
+                if "hash" in t and off + L <= len(orig):
+                    tot += 1
+                    ok += _menu_fnv1a32(orig[off:off + L]) == int(t["hash"], 16)
+            if tot:
+                print(f"  conferência da fórmula: {ok}/{tot} blocos do fundo original batem")
+            if fonte == "medida" and (tot == 0 or ok < tot):
+                print("  ! A fórmula não bateu com os hashes medidos; nada será gerado.")
+                return False
+            if fonte == "eduardo" and tot and ok < tot:
+                print("  (aviso: hashes do manifest podem ser de outra ROM/região; disposição mantida.)")
+
+        hd_path = outdir / rel
+        hd = Image.open(hd_path).convert("RGBA") if hd_path.is_file() else None
+        if hd is None or hd.size == (W, H):
+            print(f"  {fundo}: sem arte HD (o PNG ainda está no tamanho original) -- pulado")
+            continue
+
+        for menu, cor in MENU_CORES.items():
+            tingido = _menu_tint_rgba16(orig, cor)
+            tiles = []
+            for t in layout:
+                off = (t["y0"] * W + t["x0"]) * 2
+                w = t["x1"] - t["x0"]
+                L = w * (t["y1"] - t["y0"]) * 2
+                L_log = L - w * 2
+                nt = {k: t[k] for k in ("x0", "y0", "x1", "y1")}
+                if off + L <= len(tingido):
+                    nt["hash"] = f"{_menu_fnv1a32(tingido[off:off + L]):08x}"
+                if L_log > 0 and off + L_log <= len(tingido):
+                    nt["logical_hash"] = f"{_menu_fnv1a32(tingido[off:off + L_log]):08x}"
+                if "hash" in nt or "logical_hash" in nt:
+                    tiles.append(nt)
+
+            nome_png = f"generated/texture_tkmk00/tinted/{fundo}__{menu}.png"
+            destino = outdir / nome_png
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            if destino.exists():
+                print(f"  {nome_png}: já existe, mantido (apague para regerar)")
+            else:
+                _menu_tint_hd(hd, cor).save(destino)
+            saida.append({"symbol": f"{fundo}__{menu}", "png": nome_png,
+                          "width": W, "height": H, "tiles": tiles})
+            resumo.append(f"  {fundo:<22} {menu:<10} {len(tiles)} bloco(s)")
+
+    if not saida:
+        print("  ! Nenhum fundo HD foi gerado.")
+        return False
+
+    dest = root / "manifest_runtime" / "texture_tkmk00_tinted_manifest.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(saida, indent=1), encoding="utf-8")
+    # O PACK procura primeiro aqui e depois em manifest_runtime.
+    (outdir / dest.name).write_text(json.dumps(saida, indent=1), encoding="utf-8")
+    print("\n".join(resumo))
+    print(f"\n  manifest HD dos fundos: {dest}")
+    print(f"  PNGs HD tingidos: {outdir / 'generated/texture_tkmk00/tinted'}")
+    return True
+
+
+def copy_runtime_manifests(root, outdir, include_tinted=False):
+    """Copia os manifests de runtime para extracted_textures.
+
+    texture_tkmk00_tinted_manifest.json só é liberado depois que a etapa HD
+    desta execução o gerar; assim ele não aparece na primeira extração por
+    causa de um arquivo antigo deixado em manifest_runtime.
+    """
+    src = root / "manifest_runtime"
+    if not src.is_dir():
+        print("  ! pasta manifest_runtime não encontrada.")
+        return 0
+    count = 0
+    for p in src.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(src)
+        if rel.as_posix() == "texture_tkmk00_tinted_manifest.json" and not include_tinted:
+            continue
+        dst = outdir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, dst)
+        count += 1
+    return count
+
+
+def ask_generate_hd_menu_backgrounds(root, outdir):
+    """
+    Pergunta somente após a extração. A resposta não altera a extração:
+    serve apenas para disparar a etapa HD quando a arte já foi editada.
+    """
+    paths = menu_background_relpaths(root, outdir)
+    hd = []
+    for fundo, (rel, w, h) in paths.items():
+        p = outdir / rel
+        size = _png_size(p) if p.is_file() else None
+        if size and w and h and size != (w, h):
+            hd.append(f"{fundo} ({size[0]}x{size[1]})")
+
+    print("\n" + "=" * 68)
+    print("FUNDOS COLORIDOS DOS MENUS EM HD")
+    print("=" * 68)
+    if hd:
+        print("Detectei arte HD já colocada em extracted_textures:")
+        for item in hd:
+            print(f"  - {item}")
+        pergunta = "Você já colocou as imagens HD e quer gerar os backgrounds coloridos agora? [s/n]: "
+    else:
+        print("Os fundos ainda estão no tamanho original.")
+        print("Quando você substituir background_blue_sky.png e/ou background_sunset.png por arte HD,")
+        print("rode o EXTRACT_MK64_TEXTURES.py novamente para esta etapa gerar os fundos coloridos.")
+        pergunta = "Você já colocou as imagens HD e quer gerar os backgrounds coloridos agora? [s/n]: "
+
+    resp = input(pergunta).strip().lower()
+    if resp not in ("s", "sim", "y", "yes", "ok", "1"):
+        print("  Fundos coloridos HD: não gerados nesta execução.")
+        return False
+
+    return generate_hd_menu_backgrounds(root, outdir)
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -2366,6 +2847,28 @@ def main():
             tlut_by_dir[str(Path(rp).parent)].append(r)
 
     outdir = root / a.out
+
+    # SEGUNDA EXECUÇÃO: extracted_textures já foi construído.
+    # Nunca reextraia a árvore inteira sobre as imagens HD do usuário.
+    # O marcador confiável é o manifest TKMK00 produzido pela primeira extração.
+    continuation_mode = (outdir / "texture_tkmk00_manifest.json").is_file()
+    if continuation_mode:
+        print("\nModo continuação detectado: extracted_textures já foi extraído.")
+        print("Nenhuma textura editada será reextraída ou sobrescrita.")
+        # Atualiza somente a cópia protegida dos TKMK00 a partir da ROM.
+        extract_tkmk00_originals_only(root, rom, outdir, a.region if a.region != "auto" else "us")
+        print("\nManifestos de runtime: sincronizando com extracted_textures...")
+        runtime_copied = copy_runtime_manifests(root, outdir)
+        print(f"Manifestos runtime sincronizados: {runtime_copied}")
+        generated_tinted = ask_generate_hd_menu_backgrounds(root, outdir)
+        # Só depois da geração o tinted_manifest passa a ser copiado para
+        # extracted_textures. Se não foi gerado, ele não é inventado.
+        runtime_copied = copy_runtime_manifests(root, outdir, include_tinted=bool(generated_tinted))
+        print(f"Manifestos runtime sincronizados: {runtime_copied}")
+        return
+
+    # PRIMEIRA EXECUÇÃO: a árvore ainda não existe como extração completa.
+    # Não há nada HD para preservar neste momento.
     cache = {}
     dims_report = {}
     ok = skipped = guessed = from_metadata = from_source = from_format_size = from_override = 0
@@ -2532,6 +3035,25 @@ def main():
             root, rom, outdir, cache, asset_json_symbols, recipes_by_symbol, overwrite=overwrite
         )
 
+    # Primeira execução: agora que o TKMK00 acabou de ser extraído da ROM,
+    # faça a cópia protegida que será usada em todas as futuras execuções.
+    # Nunca substitua uma cópia já existente.
+    tkmk_manifest = outdir / "texture_tkmk00_manifest.json"
+    if tkmk_manifest.is_file():
+        try:
+            tkmk_items = json.loads(tkmk_manifest.read_text(encoding="utf-8"))
+        except Exception:
+            tkmk_items = []
+        for item in tkmk_items:
+            rel = item.get("png")
+            if not rel:
+                continue
+            src = outdir / rel
+            dst = outdir / "originais" / rel
+            if src.is_file() and not dst.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+
     alias_report = {"removed": [], "kept": []}
     if not a.no_generated:
         alias_report = canonicalize_common_hash_aliases(outdir)
@@ -2576,6 +3098,19 @@ def main():
         print("Dims gravadas em texture_dims.json")
     if repack_recipes:
         print("Recipes gravadas em texture_repack_recipes.json")
+
+    # Na primeira execução, sincronize somente os manifests que já existem.
+    # O texture_tkmk00_tinted_manifest ainda não existe até a etapa HD.
+    print("\nManifestos de runtime: sincronizando com extracted_textures...")
+    runtime_copied = copy_runtime_manifests(root, outdir)
+    print(f"Manifestos runtime copiados: {runtime_copied}")
+
+    generated_tinted = ask_generate_hd_menu_backgrounds(root, outdir)
+
+    # Se o usuário acabou de gerar os fundos HD, o tinted_manifest foi criado
+    # agora em manifest_runtime e somente então deve aparecer em extracted_textures.
+    runtime_copied = copy_runtime_manifests(root, outdir, include_tinted=bool(generated_tinted))
+    print(f"Manifestos runtime sincronizados: {runtime_copied}")
 
 
 if __name__ == "__main__":
