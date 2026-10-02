@@ -133,8 +133,6 @@ dessa pasta.
 | `CROSS_CHECK.py` | Cruza o log de trace do jogo com os manifests para achar texturas não encontradas |
 | `SCAN_MENU.py` | Mede, a partir de um log de trace, como o jogo divide as imagens grandes de menu em blocos |
 | `menu_tiles_geometry.json` | Disposição medida dos blocos das imagens de menu (só coordenadas, nada da ROM) |
-| `GERAR_FUNDOS_MENU_HD.py` | Assistente bilíngue (PT-BR/EN) que gera de uma vez os fundos coloridos dos menus em HD (veja [Fundos coloridos dos menus](#fundos-coloridos-dos-menus)) |
-| `TINT_MENU_BACKGROUNDS.py` | Reproduz o tingimento de fundo do jogo e gera os fundos HD e seus hashes (usado pelo assistente) |
 
 Requisito, instalado uma única vez:
 
@@ -304,48 +302,6 @@ py .\SCAN_MENU.py --log .\hdtex-trace.log --only generated/course_player_selecti
 
 Ele acrescenta as imagens novas ao `menu_tiles_geometry.json`. Depois, volte
 o trace para `0`.
-
-### Fundos coloridos dos menus
-
-As telas de seleção de modo (rosa), de personagens (verde) e de pistas
-(azul) mostram a **mesma imagem do fundo da tela inicial**, mas o jogo a
-converte para tons de cinza e a tinge em tempo de execução
-(`convert_img_to_greyscale` + `adjust_img_colour` em `menu_items.c`). Essas
-imagens tingidas não existem na ROM, então não podem ser extraídas, e seus
-hashes são diferentes dos do fundo da tela inicial — por isso continuavam
-aparecendo na resolução original.
-
-O `TINT_MENU_BACKGROUNDS.py` reproduz essa conversão exatamente (conferida
-byte a byte contra o próprio código do jogo), calcula o hash de cada bloco
-que o jogo carrega e aplica o mesmo tingimento à **sua arte HD** do fundo da
-tela inicial. A disposição dos blocos vem do manifest que já está no
-repositório — não é preciso log de trace.
-
-O jeito mais fácil é o assistente (duplo-clique, ou rode com `py`):
-
-```powershell
-pip install pillow numpy
-py .\GERAR_FUNDOS_MENU_HD.py
-```
-
-Ele pergunta o idioma (português ou inglês) e a ROM, extrai os PNGs
-originais numa pasta **separada**, `extracted_originais\` (a sua
-`extracted_textures\` não é alterada), e gera os fundos. Antes, a arte HD do
-fundo da tela inicial precisa estar no lugar:
-`extracted_textures\generated\texture_tkmk00\background_blue_sky.png`
-(e/ou `background_sunset.png`, o fundo do modo extra).
-
-Os resultados ficam em `extracted_textures\generated\texture_tkmk00\tinted\`
-(`__modo` rosa, `__personagem` verde, `__pista` azul). Você pode retocá-los;
-para regerar um, apague o PNG e rode o assistente de novo. Depois, empacote
-normalmente (`py .\PACK_TEXTURES.py --pak`).
-
-- Use a **mesma ROM** com que o jogo roda, senão os hashes não batem.
-- A pasta `extracted_originais\` contém dados derivados da ROM: não a envie
-  para o repositório.
-- Também dá para rodar o `TINT_MENU_BACKGROUNDS.py` diretamente, com
-  `--originais PASTA` apontando para uma extração separada dos PNGs
-  originais.
 
 ### Problemas comuns
 
