@@ -50,6 +50,35 @@ def load_manifest(path):
 
 
 PAK_ENTRIES = []   # usado no modo --pak: (hash_hex, w, h, bytes)
+_PAK_SOURCE = {}   # hash -> de onde a textura veio (para o grupo de pre-carregamento)
+
+# ---- Pre-carregamento dos menus --------------------------------------------
+# A primeira entrada na selecao de modo travava por ler do disco, na hora, os
+# blocos HD do menu. Agora o empacotador separa um GRUPO de texturas de menu
+# (por prioridade, ate PRELOAD_MB), grava-o contiguo no inicio do tex.pak e o
+# marca no indice; o jogo o le aos poucos enquanto a tela inicial esta parada.
+# Fora deste grupo nada muda: as corridas carregam como antes.
+PRELOAD_MB = 20
+_PRELOAD_P0 = ("background_blue_sky.png", "background_blue_sky__modo")
+_PRELOAD_P1 = ("texture_game_select", "texture_menu_1p", "texture_menu_2p",
+               "texture_menu_3p", "texture_menu_4p", "texture_mode_",
+               "texture_50cc", "texture_100cc", "texture_150cc", "texture_extra",
+               "gtexturemenuwith", "texture_begin", "texture_menu_ghost",
+               "texture_data", "texture_ok", "texture_l_option", "texture_r_data",
+               "copyright", "push_start")
+
+
+def _prioridade_preload(source):
+    s = (source or "").lower().replace("\\", "/")
+    if "texture_tkmk00" not in s and "push_start" not in s and "copyright" not in s:
+        return None
+    if any(k in s for k in _PRELOAD_P0):
+        return 0
+    if any(k in s for k in _PRELOAD_P1):
+        return 1
+    if "__personagem" in s or "__pista" in s:
+        return 3          # fundos de telas posteriores: por ultimo
+    return 2
 _HASH_RECORDS = {}
 _HASH_DEDUP_COUNT = 0
 _HASH_COLLISIONS = []
@@ -78,6 +107,7 @@ def write_tex(outdir, hash_hex, img, source=""):
     _HASH_RECORDS[hh] = (w, h, raw, source)
     if PAK_MODE:
         PAK_ENTRIES.append((hh, w, h, raw))
+        _PAK_SOURCE[hh] = source
         return None
     sub = outdir / hh[:2]
     sub.mkdir(parents=True, exist_ok=True)
@@ -666,36 +696,53 @@ def main():
                 import numpy  # noqa: F401
             except ImportError:
                 sys.exit("--dxt precisa do numpy: pip install numpy")
-            # versao 2: 24 bytes por entrada, com o formato de cada textura
-            header = struct.pack(">III", PAK_MAGIC, 2, len(PAK_ENTRIES))
-            index_size = len(PAK_ENTRIES) * 24
-            data_off = len(header) + index_size
-            index, blob, cur = b"", [], data_off
-            cont = {0: 0, 1: 0, 2: 0}
-            antes = depois = 0
+
+        # ordem dos dados: grupo de pre-carregamento primeiro (contiguo, por
+        # prioridade), depois o resto na ordem original
+        cand = []
+        for k, (hh, w, h, raw) in enumerate(PAK_ENTRIES):
+            pr = _prioridade_preload(_PAK_SOURCE.get(hh, ""))
+            if pr is not None:
+                cand.append((pr, _PAK_SOURCE.get(hh, ""), k))
+        cand.sort()
+        pre_idx, pre_bytes = [], 0
+        for pr, _src, k in cand:
+            tam = len(PAK_ENTRIES[k][3])
+            if pre_bytes + tam > PRELOAD_MB * 1024 * 1024:
+                continue
+            pre_idx.append(k)
+            pre_bytes += tam
+        pre_set = set(pre_idx)
+        ordem = pre_idx + [k for k in range(len(PAK_ENTRIES)) if k not in pre_set]
+
+        # versao 2: 24 bytes por entrada; o ultimo campo leva o formato
+        # (0 RGBA32, 1 DXT1, 2 DXT5) e, no bit 31, a marca de pre-carregamento
+        header = struct.pack(">III", PAK_MAGIC, 2, len(PAK_ENTRIES))
+        index_size = len(PAK_ENTRIES) * 24
+        data_off = len(header) + index_size
+        index, blob, cur = b"", [], data_off
+        cont = {0: 0, 1: 0, 2: 0}
+        antes = depois = 0
+        if a.dxt:
             print(f"comprimindo {len(PAK_ENTRIES)} texturas em DXT...")
-            for n_i, (hh, w, h, raw) in enumerate(PAK_ENTRIES, 1):
-                fmt, dados = 0, raw
-                if w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
-                    fmt, dados = dxt_encode(raw, w, h)
-                cont[fmt] += 1
-                antes += len(raw); depois += len(dados)
-                index += struct.pack(">IIIIII", int(hh, 16), cur, len(dados), w, h, fmt)
-                blob.append(dados)
-                cur += len(dados)
-                if n_i % 1000 == 0:
-                    print(f"  {n_i}/{len(PAK_ENTRIES)}")
+        for n_i, k in enumerate(ordem, 1):
+            hh, w, h, raw = PAK_ENTRIES[k]
+            fmt, dados = 0, raw
+            if a.dxt and w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
+                fmt, dados = dxt_encode(raw, w, h)
+            cont[fmt] += 1
+            antes += len(raw); depois += len(dados)
+            campo = fmt | (0x80000000 if k in pre_set else 0)
+            index += struct.pack(">IIIIII", int(hh, 16), cur, len(dados), w, h, campo)
+            blob.append(dados)
+            cur += len(dados)
+            if a.dxt and n_i % 1000 == 0:
+                print(f"  {n_i}/{len(PAK_ENTRIES)}")
+        if a.dxt:
             print(f"DXT: {cont[1]} DXT1, {cont[2]} DXT5, {cont[0]} sem compressao "
                   f"| {antes/1024/1024:.0f} MB -> {depois/1024/1024:.0f} MB")
-        else:
-            header = struct.pack(">III", PAK_MAGIC, 1, len(PAK_ENTRIES))
-            index_size = len(PAK_ENTRIES) * 20
-            data_off = len(header) + index_size
-            index, blob, cur = b"", [], data_off
-            for hh, w, h, raw in PAK_ENTRIES:
-                index += struct.pack(">IIIII", int(hh, 16), cur, len(raw), w, h)
-                blob.append(raw)
-                cur += len(raw)
+        print(f"pre-carregamento dos menus: {len(pre_idx)} texturas, "
+              f"{pre_bytes/1024/1024:.1f} MB (limite {PRELOAD_MB} MB)")
         with open(pak, "wb") as f:
             f.write(header); f.write(index)
             for b in blob:

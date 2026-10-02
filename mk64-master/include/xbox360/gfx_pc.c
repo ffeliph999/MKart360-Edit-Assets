@@ -528,7 +528,10 @@ static uint32_t x360_us_since(const LARGE_INTEGER *t0) {
     return (uint32_t)((t1.QuadPart - t0->QuadPart) * 1000000 / x360_st_freq.QuadPart);
 }
 
-#define X360_HDRAM_SLOTS   1024
+#define X360_HDRAM_SLOTS   4096   /* era 1024: o grupo de pre-carregamento dos menus tem ~1800 texturas
+                                        pequenas, e com 1024 o cache descartava as primeiras (as de
+                                        maior prioridade) antes de usar os 40 MB. O limite de bytes
+                                        continua o mesmo. */
 #define X360_HDRAM_BUDGET  (40u << 20)   /* 40 MB: a memoria do 360 e
                                              unificada, entao este cache
                                              disputa espaco com a VRAM. */
@@ -676,7 +679,7 @@ static void x360_dxt_decode(const uint8_t *src, uint32_t w, uint32_t h, uint32_t
    de volta nos .tex soltos em game:\tex\XX\. */
 #define X360_PAK_MAGIC 0x4844504Bu   /* "HDPK" */
 
-struct X360PakEntry { uint32_t hash, off, size, w, h, fmt; };
+struct X360PakEntry { uint32_t hash, off, size, w, h, fmt, preload; };
 
 /* Leitura antecipada: cada leitura do disco tem um custo fixo de latencia,
    quase igual para 8 KB ou 256 KB. As estatisticas mostraram 150-240 leituras
@@ -735,7 +738,13 @@ static void x360_pak_open(void) {
         x360_pak_index[i].size = x360_be32(e + 8);
         x360_pak_index[i].w    = x360_be32(e + 12);
         x360_pak_index[i].h    = x360_be32(e + 16);
-        x360_pak_index[i].fmt  = (esz >= 24) ? x360_be32(e + 20) : 0;
+        {
+            /* campo final: formato nos bits baixos; bit 31 = grupo de
+               pre-carregamento dos menus (marcado pelo PACK_TEXTURES.py) */
+            const uint32_t campo = (esz >= 24) ? x360_be32(e + 20) : 0;
+            x360_pak_index[i].fmt     = campo & 0xFF;
+            x360_pak_index[i].preload = campo >> 31;
+        }
     }
     free(raw);
     x360_pak_count = count;
@@ -965,6 +974,110 @@ static void x360_async_drain(void) {
             x360_hdtex_remember(d.hash, X360_HDTEX_ST_MISS);
         }
     }
+}
+
+/* ---- Pre-carregamento dos menus -------------------------------------------
+   A primeira entrada na selecao de modo travava lendo do disco, na hora, os
+   blocos HD do menu. O tex.pak traz agora um grupo de texturas de menu,
+   contiguo no inicio do arquivo e marcado no indice. Fora das corridas, o
+   jogo le esse grupo aos poucos para o cache em RAM, com um limite de tempo
+   por quadro -- normalmente enquanto a tela inicial esta parada. Nas corridas
+   nada muda (o pre-carregamento nem roda, e o cache funciona como antes).
+   0 desliga. */
+#define X360_PRELOAD_MS_POR_QUADRO 5   /* era 3: medido com folga na tela inicial */
+static uint32_t x360_pre_pos;
+static bool x360_pre_done;
+/* estatisticas do pre-carregamento: lidas no periodo, total acumulado */
+static uint32_t x360_st_pre, x360_pre_total, x360_pre_kb, x360_pre_ja;
+
+/* Leitura do grupo INTEIRO de uma vez, no primeiro quadro (ainda no boot).
+   O grupo esta contiguo no tex.pak, entao e uma unica leitura sequencial de
+   ~20 MB -- o caso mais rapido para qualquer disco (cerca de 1 s no pendrive),
+   paga uma vez so, antes da tela inicial. Assim o menu fica pronto desde a
+   primeira entrada, sem precisar esperar na tela inicial. Se algo impedir
+   (grupo nao contiguo, falta de memoria, erro de leitura), o modo gradual
+   abaixo assume normalmente. 0 desliga. */
+#define X360_PRELOAD_NO_BOOT 1
+static bool x360_pre_boot_tried;
+
+static void x360_preload_boot(void) {
+    x360_pre_boot_tried = true;
+#if X360_PRELOAD_NO_BOOT
+    uint32_t n = 0;
+    while (n < x360_pak_count && x360_pak_index[n].preload) ++n;
+    if (!n) return;
+    const uint32_t ini = x360_pak_index[0].off;
+    uint32_t fim = ini;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (x360_pak_index[i].off != fim) return;     /* nao contiguo: modo gradual */
+        fim += x360_pak_index[i].size;
+    }
+    const uint32_t total = fim - ini;
+    if (!total || total > (64u << 20)) return;
+    uint8_t *buf = (uint8_t *)malloc(total);
+    if (!buf) return;
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
+    DWORD got = 0;
+    if (SetFilePointer(x360_pak_file, (LONG)ini, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
+        !ReadFile(x360_pak_file, buf, total, &got, NULL) || got != total) {
+        free(buf);
+        return;
+    }
+    x360_st_disk_us += x360_us_since(&t0);
+    ++x360_st_reads;
+    for (uint32_t i = 0; i < n; ++i) {
+        const struct X360PakEntry *e = &x360_pak_index[i];
+        if (!e->w || !e->h || e->w > 2048 || e->h > 2048 || e->fmt > 2) continue;
+        if (!e->size || e->size != x360_dxt_size(e->w, e->h, e->fmt)) continue;
+        if (x360_hdram_find(e->hash) >= 0) { ++x360_pre_ja; continue; }
+        x360_hdram_store_fmt(e->hash, e->w, e->h, buf + (e->off - ini), e->size, (uint8_t)e->fmt);
+        x360_hdtex_remember(e->hash, X360_HDTEX_ST_HIT);
+        ++x360_st_pre; ++x360_pre_total; x360_pre_kb += e->size >> 10;
+    }
+    free(buf);
+    x360_pre_pos = n;
+    x360_pre_done = true;
+#endif
+}
+
+static void x360_preload_step(void) {
+#if X360_PRELOAD_MS_POR_QUADRO
+    /* Saiu de uma corrida (inclusive das demos automaticas da tela inicial):
+       a corrida encheu o cache e pode ter descartado os menus. Recomeca o
+       grupo; o que ainda estiver na memoria e pulado. */
+    static int estado_anterior = -1;
+    if (estado_anterior == 4 && gGamestate != 4) {
+        x360_pre_pos = 0;
+        x360_pre_done = false;
+    }
+    estado_anterior = gGamestate;
+    if (x360_pre_done || gGamestate == 4 /* RACING */) return;
+    x360_pak_open();
+    if (x360_pak_file == INVALID_HANDLE_VALUE || !x360_pak_index) { x360_pre_done = true; return; }
+    if (!x360_pre_boot_tried) {                 /* primeiro quadro: tudo de uma vez */
+        x360_preload_boot();
+        if (x360_pre_done) return;
+    }
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
+    while (x360_pre_pos < x360_pak_count) {
+        const struct X360PakEntry *e = &x360_pak_index[x360_pre_pos];
+        if (!e->preload) { x360_pre_done = true; return; }   /* fim do grupo */
+        ++x360_pre_pos;
+        if (x360_hdram_find(e->hash) >= 0) { ++x360_pre_ja; continue; }
+        if (!e->w || !e->h || e->w > 2048 || e->h > 2048 || e->fmt > 2) continue;
+        if (!e->size || e->size != x360_dxt_size(e->w, e->h, e->fmt)) continue;
+        uint8_t *dest = (e->fmt == 0) ? x360_hd_buf : x360_dxt_raw;
+        if (e->size > ((e->fmt == 0) ? sizeof(x360_hd_buf) : sizeof(x360_dxt_raw))) continue;
+        if (!x360_pak_fetch(e->off, e->size, dest)) continue;
+        x360_hdram_store_fmt(e->hash, e->w, e->h, dest, e->size, (uint8_t)e->fmt);
+        x360_hdtex_remember(e->hash, X360_HDTEX_ST_HIT);
+        ++x360_st_pre; ++x360_pre_total; x360_pre_kb += e->size >> 10;
+        if (x360_us_since(&t0) >= X360_PRELOAD_MS_POR_QUADRO * 1000u) return;
+    }
+    x360_pre_done = true;
+#endif
 }
 
 static bool x360_try_load_hd_texture(uint32_t hash) {
@@ -4561,6 +4674,7 @@ struct GfxRenderingAPI *gfx_get_current_rendering_api(void) {
 
 void gfx_start_frame(void) {
     x360_async_drain();
+    x360_preload_step();
     /* B17G13 RACE-TIMER-CORRELATION: sparse timeline keyed to the exact on-screen race timer.
      * At most four lines per GAME second. */
     {
@@ -4681,25 +4795,34 @@ void gfx_end_frame(void) {
         x360_st_last_frame = agora;
     }
     if (++x360_st_frames >= 60) {
-        char line[200];
+        char line[512];   /* era 200: a linha cresceu com os campos novos e, ao
+                             nao caber, _snprintf devolvia -1 e nada era gravado */
         int n = _snprintf(line, sizeof(line) - 1,
             "pak=%u reads=%u rahit=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u "
-            "diskMS=%u decMS=%u uploadMS=%u frameMaxMS=%u acima17ms=%u acima33ms=%u\r\n",
+            "diskMS=%u decMS=%u uploadMS=%u frameMaxMS=%u acima17ms=%u acima33ms=%u "
+            "estado=%d pre=%u preTotal=%u preMB=%u preJa=%u preFim=%u grupo=%u/%u\r\n",
             x360_st_pak, x360_st_reads, x360_st_rahit, x360_st_ramhit, x360_st_evict,
             x360_st_up, x360_st_upkb, (unsigned)(x360_hdram_bytes >> 20),
             x360_st_disk_us / 1000, x360_st_dec_us / 1000, x360_st_up_us / 1000,
-            x360_st_fmax_us / 1000, x360_st_f17, x360_st_f34);
+            x360_st_fmax_us / 1000, x360_st_f17, x360_st_f34,
+            gGamestate, x360_st_pre, x360_pre_total, x360_pre_kb >> 10, x360_pre_ja,
+            x360_pre_done ? 1u : 0u, x360_pre_pos, x360_pak_count);
         HANDLE f = CreateFileA("game:\\hdtex-stats.log", GENERIC_WRITE, FILE_SHARE_READ,
                                NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (f != INVALID_HANDLE_VALUE) {
             DWORD w = 0;
             SetFilePointer(f, 0, NULL, FILE_END);
+            if (n < 0) {   /* nao coube: grava o que couber, terminado em quebra */
+                n = (int)sizeof(line) - 3;
+                line[n] = '\r'; line[n + 1] = '\n'; n += 2;
+            }
             if (n > 0) WriteFile(f, line, (DWORD)n, &w, NULL);
             CloseHandle(f);
         }
         x360_st_pak = x360_st_ramhit = x360_st_evict = x360_st_up = x360_st_upkb = 0;
         x360_st_reads = x360_st_rahit = x360_st_disk_us = x360_st_dec_us = x360_st_up_us = 0;
         x360_st_fmax_us = x360_st_f17 = x360_st_f34 = 0;
+        x360_st_pre = 0;
         x360_st_frames = 0;
     }
 #endif
