@@ -125,3 +125,27 @@ torch.hash.yml
 !/assets/code/rainbow_road_tluts/rainbow_road_tluts.c
 !/assets/code/startup_logo/
 !/assets/code/startup_logo/startup_logo.c
+
+# --- Texturas HD (derivados da ROM: nunca versionar) ---
+/extracted_textures/
+/extracted_originais/
+/tex/
+tex.pak
+*.tex
+*.orig.png
+# gerados pelo PUBLIC_PREPARE_MK64_ASSETS.py a partir da ROM
+/src/xbox360/generated_banks/
+# outros formatos de ROM (o *.z64 ja esta ignorado acima)
+*.n64
+*.v64
+
+# --- Logs de diagnostico ---
+hdtex-trace.log
+hdtex-stats*.log
+
+# --- Backups e arquivos de teste locais ---
+*.exp60bak
+*.bak
+*.BAK
+gfx_pc_MEDIR_*.c
+IMPORTAR_PACK_HD.py
