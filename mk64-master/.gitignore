@@ -154,3 +154,11 @@ IMPORTAR_PACK_HD.py
 # (w64devkit, CMake, Ninja, Git portatil, Torch, fontes das tools do decomp e
 #  os executaveis n64graphics/mio0/tkmk00). Nada aqui deve ser versionado.
 /tools/
+
+# --- Gerados a partir da ROM pelo PUBLIC_PREPARE_MK64_ASSETS.py ---
+# (os de assets/ ja sao ignorados pela regra /assets/**/*.inc.c acima;
+#  os course_textures.linkonly.* pela regra *linkonly*)
+/textures/standalone/*.inc.c
+/textures/crash_screen/*.inc.c
+/courses/*/staff_ghost.inc.c
+/PUBLIC_ASSETS_PREPARED.txt
