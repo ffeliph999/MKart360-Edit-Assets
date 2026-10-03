@@ -8,7 +8,7 @@ Eles são necessários para compilar o projeto para Xbox 360.
 
 ### 2. Copie o Patch
 
-Copie o patch para dentro da pasta `MKart360-Edit-Assets-sincronizacao`.
+Copie o patch para dentro da pasta `MKart360-Edit-Assets`.
 
 ------------------------------------------------------------------------
 
@@ -16,7 +16,7 @@ Copie o patch para dentro da pasta `MKart360-Edit-Assets-sincronizacao`.
 
 Renomeie sua ROM e coloque-a aqui:
 
-`MKart360-Edit-Assets-sincronizacao\mk64-master\baserom.br.z64`
+`MKart360-Edit-Assets\mk64-master\baserom.br.z64`
 
 Por exemplo:
 
@@ -258,7 +258,7 @@ antes da extração das texturas.
 Copie `MK64.xex` de:
 
 ```text
-MKart360-Edit-Assets-sincronizacao\MK64\Release\MK64.xex
+MKart360-Edit-Assets\MK64\Release\MK64.xex
 ```
 
 ------------------------------------------------------------------------
