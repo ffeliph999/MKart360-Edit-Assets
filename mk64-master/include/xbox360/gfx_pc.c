@@ -1944,6 +1944,21 @@ static void import_texture(int tile) {
     {
         uint32_t hd_hash = x360_texture_hash(source, source_size);
         uint32_t hd_logical_hash = 0;
+        /* Texturas CI com paleta completa (256 cores): hash de pixels + paleta.
+           Animacoes por troca de paleta (os neons da Rainbow Road) usam os
+           MESMOS pixels em todos os quadros; so a paleta muda. Com o hash so
+           dos pixels, todos os quadros tinham o mesmo hash -- no tex.pak so
+           cabia um, e no jogo a imagem HD ficava parada. Este hash e procurado
+           ANTES do hash so de pixels; se nao existir no tex.pak, o
+           comportamento e exatamente o de antes (karts etc. nao mudam).
+           Equivale a FNV-1a sobre (pixels || paleta), como no extrator. */
+        uint32_t hd_pal_hash = 0;
+        if (gfx_texture_tile(tile)->fmt == G_IM_FMT_CI && rdp.palette && rdp.palette_bytes == 512) {
+            const uint8_t *pal = (const uint8_t *)rdp.palette;
+            uint32_t ph = hd_hash;
+            for (uint32_t i = 0; i < 512; ++i) ph = (ph ^ pal[i]) * 16777619U;
+            hd_pal_hash = ph;
+        }
         uint32_t hd_logical_rows = 0;
         /* G_LOADTILE usa lrt inclusivo. Em algumas texturas do menu (nomes,
            titulos etc.) isso faz o renderer capturar uma linha extra: o
@@ -1983,11 +1998,17 @@ static void import_texture(int tile) {
            da imagem -- fosse comparado. */
         if (node->x360_hd_loaded != 0 &&
             (node->x360_hd_loaded == hd_hash ||
+             (hd_pal_hash != 0 && node->x360_hd_loaded == hd_pal_hash) ||
              (hd_logical_hash != 0 && node->x360_hd_loaded == hd_logical_hash))) {
             return;
         }
-        bool hd_found = x360_try_load_hd_texture(hd_hash);
+        bool hd_found = false;
         uint32_t hd_used_hash = hd_hash;
+        if (hd_pal_hash) {
+            hd_found = x360_try_load_hd_texture(hd_pal_hash);
+            if (hd_found) hd_used_hash = hd_pal_hash;
+        }
+        if (!hd_found) hd_found = x360_try_load_hd_texture(hd_hash);
         if (!hd_found && hd_logical_hash) {
             hd_found = x360_try_load_hd_texture(hd_logical_hash);
             if (hd_found) hd_used_hash = hd_logical_hash;

@@ -8,7 +8,7 @@ These are required to compile the project for Xbox 360.
 
 ### 2. Copy the Patch
 
-Copy the patch into the `MKart360-Universal` folder.
+Copy the patch into the `MKart360-Edit-Assets-sincronizacao` folder.
 
 ------------------------------------------------------------------------
 
@@ -16,7 +16,7 @@ Copy the patch into the `MKart360-Universal` folder.
 
 Rename your ROM and place it here:
 
-`MKart360-Universal\mk64-master\baserom.br.z64`
+`MKart360-Edit-Assets-sincronizacao\mk64-master\baserom.br.z64`
 
 For example:
 
@@ -26,19 +26,19 @@ For example:
 
 You only need to do this once.
 
-``` powershell
+```powershell
 winget install Python.Python.3
 ```
 
 Close and reopen PowerShell, then check the installation:
 
-``` powershell
+```powershell
 py --version
 ```
 
 If you see something similar to:
 
-``` text
+```text
 Python 3.13.x
 ```
 
@@ -50,7 +50,7 @@ Python is installed correctly.
 
 You only need to do this once.
 
-``` powershell
+```powershell
 pip install pillow
 ```
 
@@ -60,7 +60,7 @@ pip install pillow
 
 Run:
 
-``` powershell
+```powershell
 powershell -ExecutionPolicy Bypass -File ".\xbox360\setup_windows_asset_tools.ps1" -SkipTorch
 ```
 
@@ -73,9 +73,12 @@ on Windows.
 
 Run:
 
-``` powershell
+```powershell
 py .\PUBLIC_PREPARE_MK64_ASSETS.py
 ```
+
+This step prepares the ROM and the assets required for the texture
+extraction and editing workflow.
 
 ------------------------------------------------------------------------
 
@@ -83,9 +86,23 @@ py .\PUBLIC_PREPARE_MK64_ASSETS.py
 
 Run:
 
-``` powershell
+```powershell
 py .\EXTRACT_MK64_TEXTURES.py
 ```
+
+The script extracts the textures and also automatically prepares and
+synchronizes the manifests required by the HD texture system.
+
+**IMPORTANT:**
+
+You no longer need to manually copy any `.json` files from
+`manifest_runtime` to `extracted_textures`.
+
+`EXTRACT_MK64_TEXTURES.py` handles this synchronization automatically.
+
+If the script detects that `extracted_textures` has already been
+extracted, it enters continuation mode and avoids overwriting textures
+you have already edited.
 
 ------------------------------------------------------------------------
 
@@ -93,7 +110,7 @@ py .\EXTRACT_MK64_TEXTURES.py
 
 The extracted textures will be placed in:
 
-``` text
+```text
 extracted_textures
 ```
 
@@ -107,8 +124,19 @@ be replaced with a 128×128 version.
 
 Do not rename the files or change the folder structure.
 
-The file name and path stored in the manifest are used to match the
+The file name and path stored in the manifests are used to match the
 edited texture with the original texture in the game.
+
+After adding or modifying an HD menu background texture, run:
+
+```powershell
+py .\EXTRACT_MK64_TEXTURES.py
+```
+
+again.
+
+The script can detect the HD images already present and generate the
+required variants for the colored menu backgrounds.
 
 ------------------------------------------------------------------------
 
@@ -120,7 +148,7 @@ and the game already uses part of that memory.
 With all 2568 sprites included, using two files per sprite, the
 approximate raw RGBA32 image sizes would be:
 
-``` text
+```text
 256×256  →  ~640 MB
 128×128  →  ~160 MB
 96×96    →  ~90 MB
@@ -137,107 +165,24 @@ quality without using as much memory as 256×256.
 
 ------------------------------------------------------------------------
 
-## REDUCING TEXTURE RESOLUTION
-
-If you want to reduce the resolution of your edited PNGs by half, place:
-
-``` text
-HALVE_PNGS.py
-```
-
-in the main project folder and run:
-
-``` powershell
-py .\HALVE_PNGS.py --recursive
-```
-
-This only previews the changes and does not modify the files.
-
-To apply the changes:
-
-``` powershell
-py .\HALVE_PNGS.py --apply --recursive
-```
-
-To create a backup of the original files before making the changes:
-
-``` powershell
-py .\HALVE_PNGS.py --apply --recursive --backup
-```
-
-The original files will be kept with the following extension:
-
-``` text
-*.orig.png
-```
-
-------------------------------------------------------------------------
-
-### 10. Copy the Runtime Manifests
-
-The HD texture system uses two runtime manifests that must be copied
-from:
-
-``` text
-manifest_runtime
-```
-
-to:
-
-``` text
-extracted_textures
-```
-
-Copy these two files:
-
-``` text
-manifest_runtime\texture_tkmk00_runtime_manifest.json
-manifest_runtime\texture_tkmk00_names_runtime_manifest.json
-```
-
-into:
-
-``` text
-extracted_textures\texture_tkmk00_runtime_manifest.json
-extracted_textures\texture_tkmk00_names_runtime_manifest.json
-```
-
-You can do this from PowerShell with:
-
-``` powershell
-Copy-Item ".\manifest_runtime\texture_tkmk00_runtime_manifest.json" ".\extracted_textures\texture_tkmk00_runtime_manifest.json" -Force
-Copy-Item ".\manifest_runtime\texture_tkmk00_names_runtime_manifest.json" ".\extracted_textures\texture_tkmk00_names_runtime_manifest.json" -Force
-```
-
-**IMPORTANT:**
-
-Do this after editing the textures and **before** running
-`PACK_TEXTURES.py`.
-
-The manifests provide the runtime texture information required by the
-packing process. They replace the old `PATCH_HD_TEXTURES.py` step in the
-current workflow.
-
-------------------------------------------------------------------------
-
-### 11. Rebuild the Textures
+### 10. Rebuild the Textures
 
 If you only modified one texture folder, such as the karts, run:
 
-``` powershell
+```powershell
 py .\PACK_TEXTURES.py --only karts --pak
 ```
 
 If you modified textures from multiple folders or all texture folders,
 run:
 
-``` powershell
+```powershell
 py .\PACK_TEXTURES.py --pak
 ```
 
 The process creates:
 
-``` text
+```text
 tex\tex.pak
 ```
 
@@ -255,7 +200,7 @@ Limits the process to a specific folder or subset.
 
 Example:
 
-``` powershell
+```powershell
 --only karts\bowser
 ```
 
@@ -265,7 +210,7 @@ Sets the output folder.
 
 Default:
 
-``` text
+```text
 tex
 ```
 
@@ -275,56 +220,60 @@ Skips images larger than `N` pixels.
 
 Default:
 
-``` text
+```text
 2048
 ```
 
 Without `--pak`, the script creates individual `.tex` files inside
 subfolders.
 
-The `.pak` format is recommended for the final version. Individual
-`.tex` files can be useful for testing or debugging.
+The `.pak` format is recommended for the final version. Individual `.tex`
+files can be useful for testing or debugging.
 
 **IMPORTANT:**
 
 Whenever possible, only pack the textures you actually modified.
+
 Unedited textures can generate files that replace the original textures
 with identical copies, providing no visual improvement while taking up
 additional space.
 
 ------------------------------------------------------------------------
 
-### 12. Compile the Project for Xbox 360
+### 11. Compile the Project for Xbox 360
 
 Run:
 
-``` powershell
+```powershell
 powershell -ExecutionPolicy Bypass -File ".\PUBLIC_BUILD_XBOX360.ps1"
 ```
 
+The `PUBLIC_PREPARE_MK64_ASSETS.py` step was already completed earlier,
+before extracting the textures.
+
 ------------------------------------------------------------------------
 
-### 13. Get the Compiled XEX
+### 12. Get the Compiled XEX
 
 Copy `MK64.xex` from:
 
-``` text
-MKart360-Universal\MK64\Release\MK64.xex
+```text
+MKart360-Edit-Assets-sincronizacao\MK64\Release\MK64.xex
 ```
 
 ------------------------------------------------------------------------
 
-### 14. Create the Game Folder
+### 13. Create the Game Folder
 
 Create a folder with any name you want. For example:
 
-``` text
+```text
 MK64
 ```
 
 Place the following files inside it:
 
-``` text
+```text
 baserom.br.z64
 MK64.xex
 tex.pak
