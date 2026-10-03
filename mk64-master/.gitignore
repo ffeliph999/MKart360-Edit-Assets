@@ -149,3 +149,8 @@ hdtex-stats*.log
 *.BAK
 gfx_pc_MEDIR_*.c
 IMPORTAR_PACK_HD.py
+
+# --- Ferramentas baixadas/compiladas pelo xbox360/setup_windows_asset_tools.ps1 ---
+# (w64devkit, CMake, Ninja, Git portatil, Torch, fontes das tools do decomp e
+#  os executaveis n64graphics/mio0/tkmk00). Nada aqui deve ser versionado.
+/tools/
