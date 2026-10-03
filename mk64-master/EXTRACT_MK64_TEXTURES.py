@@ -1292,7 +1292,8 @@ def extract_rainbow_road_neon_frames(root, rom, outdir, cache, overwrite=True):
                     tlut_raw = source_bytes(rom, tlut_off, cache, tlut_block + tlut_needed)
                     if len(tlut_raw) < tlut_block + tlut_needed:
                         raise ValueError(f"TLUT incompleta ({len(tlut_raw)} < {tlut_block + tlut_needed})")
-                    palette = decode_palette(tlut_raw[tlut_block:tlut_block + tlut_needed])
+                    tlut_bytes = tlut_raw[tlut_block:tlut_block + tlut_needed]
+                    palette = decode_palette(tlut_bytes)
                     rgba = decode("ci8", data, w, h, palette, transparent_black=TRANSPARENT_BLACK)
 
                     rel = (Path("generated") / "asset_json" / "rainbow_road" /
@@ -1313,6 +1314,23 @@ def extract_rainbow_road_neon_frames(root, rom, outdir, cache, overwrite=True):
                         "tlut_rom_offset": f"0x{int_value(tlut_info['rom_offset']):X}",
                         "tlut_block_offset": tlut_block,
                         "decoded_size": w * h * 4,
+                        # O jogo desenha o neon (64x64 CI8 = 4 KB) em DUAS faixas
+                        # de 64x32 com 1 linha de sobreposicao
+                        # (render_objects.c: draw_rectangle_texture_overlap):
+                        # bytes 0..2047 (linhas 0-31) e 1984..4031 (linhas 31-62),
+                        # como os sprites dos karts. O gfx_pc.c procura, para
+                        # texturas CI com paleta de 256 cores, o hash FNV-1a de
+                        # (faixa || paleta): os pixels sao os mesmos em todos os
+                        # quadros, so a paleta muda. Sem estes hashes o
+                        # PACK_TEXTURES ignorava os quadros.
+                        "tmem_halves": [
+                            {"y0": 0, "y1": 32,
+                             "hash": f"{fnv1a32(bytes(data[0:2048]) + bytes(tlut_bytes)):08x}"},
+                            {"y0": 31, "y1": 63,
+                             "hash": f"{fnv1a32(bytes(data[1984:4032]) + bytes(tlut_bytes)):08x}"},
+                        ] if (w, h) == (64, 64) else [],
+                        # So da paleta: compara com o "ph" do trace se precisar.
+                        "tlut_hash_fnv1a32": f"{fnv1a32(bytes(tlut_bytes)):08x}",
                         "animation_source": "Rainbow Road neon TLUT animation"
                     })
                 except Exception as exc:

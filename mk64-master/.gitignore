@@ -168,3 +168,7 @@ IMPORTAR_PACK_HD.py
 /texture_dims.json
 /texture_repack_recipes.json
 /texture_skip_list.txt
+
+# --- Gerado pelo EXTRACT_MK64_TEXTURES.py ---
+# (hashes calculados a partir da ROM de cada usuario)
+/manifest_runtime/texture_tkmk00_tinted_manifest.json
