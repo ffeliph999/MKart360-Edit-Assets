@@ -1229,6 +1229,101 @@ def load_tkmk_asset_entries(root, region="us"):
     return out
 
 
+def extract_rainbow_road_neon_frames(root, rom, outdir, cache, overwrite=True):
+    """Extrai todos os frames visuais dos neons animados de Rainbow Road.
+
+    As texturas CI8 dos neons usam o mesmo bloco de pixels para cada personagem;
+    a animação acontece trocando a TLUT. O extractor antigo exportava somente a
+    textura usando uma TLUT fixa (Mushroom4/Mario5/Boo5 ou a TLUT única), deixando
+    os demais estados da animação de fora.
+
+    Aqui cada TLUT declarada em assets/courses/rainbow_road.json e aplicada aos
+    pixels CI8 correspondentes, produzindo um PNG 64x64 por frame. Isso preserva
+    exatamente a forma como o jogo anima os neons: não inventamos novos pixels,
+    apenas renderizamos o mesmo CI8 com cada paleta original da ROM.
+    """
+    json_path = root / "assets" / "courses" / "rainbow_road.json"
+    if not json_path.is_file():
+        return [], []
+    try:
+        obj = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], []
+
+    textures = {k: v for k, v in obj.items()
+                if isinstance(v, dict) and k.startswith("gTextureRainbowRoadNeon")}
+    tluts = {k: v for k, v in obj.items()
+             if isinstance(v, dict) and k.startswith("gTLUTRainbowRoadNeon")}
+    if not textures or not tluts:
+        return [], []
+
+    # Relaciona cada textura ao conjunto de TLUTs que o runtime usa.
+    groups = {}
+    for tex_symbol, info in textures.items():
+        stem = tex_symbol[len("gTextureRainbowRoadNeon"):]
+        prefix = "gTLUTRainbowRoadNeon" + stem
+        candidates = [(name, rec) for name, rec in tluts.items()
+                      if name == prefix or name.startswith(prefix)]
+        candidates.sort(key=lambda x: x[0])
+        if candidates:
+            groups[tex_symbol] = candidates
+
+    exported, skipped = [], []
+    for tex_symbol, tlut_items in groups.items():
+        tex_info = textures[tex_symbol]
+        try:
+            tex_off = int_value(tex_info["rom_offset"])
+            tex_block = int_value(tex_info.get("block_offset", 0))
+            w = int(tex_info["width"]); h = int(tex_info["height"])
+            fmt = str(tex_info["type"]).lower()
+            if fmt != "ci8":
+                continue
+            tex_needed = (w * h * BPP[fmt] + 7) // 8
+            raw = source_bytes(rom, tex_off, cache, tex_block + tex_needed)
+            if len(raw) < tex_block + tex_needed:
+                raise ValueError(f"textura CI8 incompleta ({len(raw)} < {tex_block + tex_needed})")
+            data = raw[tex_block:tex_block + tex_needed]
+
+            for frame_idx, (tlut_symbol, tlut_info) in enumerate(tlut_items, start=1):
+                try:
+                    tlut_off = int_value(tlut_info["rom_offset"])
+                    tlut_block = int_value(tlut_info.get("block_offset", 0))
+                    tlut_needed = 16 * 16 * 2
+                    tlut_raw = source_bytes(rom, tlut_off, cache, tlut_block + tlut_needed)
+                    if len(tlut_raw) < tlut_block + tlut_needed:
+                        raise ValueError(f"TLUT incompleta ({len(tlut_raw)} < {tlut_block + tlut_needed})")
+                    palette = decode_palette(tlut_raw[tlut_block:tlut_block + tlut_needed])
+                    rgba = decode("ci8", data, w, h, palette, transparent_black=TRANSPARENT_BLACK)
+
+                    rel = (Path("generated") / "asset_json" / "rainbow_road" /
+                           "rainbow_road" / "frames" / f"{tex_symbol}_frame{frame_idx:02d}.png")
+                    write_png(outdir / rel, w, h, rgba, overwrite=overwrite)
+                    exported.append({
+                        "png": str(rel).replace("\\", "/"),
+                        "bank": "asset_json.c",
+                        "symbol": f"{tex_symbol}_frame{frame_idx:02d}",
+                        "source_texture": tex_symbol,
+                        "tlut_symbol": tlut_symbol,
+                        "frame": frame_idx,
+                        "width": w, "height": h,
+                        "format": "ci8",
+                        "compression": "raw",
+                        "rom_offset": f"0x{tex_off:X}",
+                        "block_offset": tex_block,
+                        "tlut_rom_offset": f"0x{int_value(tlut_info['rom_offset']):X}",
+                        "tlut_block_offset": tlut_block,
+                        "decoded_size": w * h * 4,
+                        "animation_source": "Rainbow Road neon TLUT animation"
+                    })
+                except Exception as exc:
+                    skipped.append({"symbol": tlut_symbol, "texture": tex_symbol,
+                                    "frame": frame_idx, "reason": str(exc)})
+        except Exception as exc:
+            skipped.append({"symbol": tex_symbol, "reason": str(exc)})
+
+    return exported, skipped
+
+
 def extract_missing_asset_json_textures(root, rom, outdir, cache, asset_json_symbols,
                                         generated_entries, tkmk_symbols, overwrite=True):
     """Exporta texturas declaradas em assets/**/*.json que ainda nao pertencem
@@ -1579,6 +1674,15 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
     exported.extend(asset_json_extra)
     manifests_by_bank["asset_json.c"].extend(asset_json_extra)
 
+    # Rainbow Road neon animation: each state uses the same CI8 pixels with a
+    # different TLUT. Export every visual frame instead of only the canonical
+    # texture rendered with one fixed palette.
+    rainbow_frames, rainbow_frame_skipped = extract_rainbow_road_neon_frames(
+        root, rom, outdir, cache, overwrite=overwrite
+    )
+    exported.extend(rainbow_frames)
+    manifests_by_bank["asset_json.c"].extend(rainbow_frames)
+
     # Manifesto consolidado + manifests por banco. O consolidado continua
     # sendo a fonte principal do PACK_TEXTURES, enquanto os três arquivos
     # separados facilitam auditoria e ferramentas externas.
@@ -1597,6 +1701,13 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
             encoding="utf-8"
         )
 
+    (outdir / "rainbow_road_neon_frames_manifest.json").write_text(
+        json.dumps(rainbow_frames, indent=1), encoding="utf-8"
+    )
+    (outdir / "rainbow_road_neon_frames_skipped.json").write_text(
+        json.dumps(rainbow_frame_skipped, indent=1), encoding="utf-8"
+    )
+
     (outdir / "texture_tkmk00_manifest.json").write_text(
         json.dumps(tkmk_exported, indent=1), encoding="utf-8")
 
@@ -1609,6 +1720,8 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
         "generated_entries": len(exported),
         "asset_json_discovered_entries": len(asset_json_extra),
         "asset_json_discovered_skipped": len(asset_json_skipped),
+        "rainbow_road_neon_frames": len(rainbow_frames),
+        "rainbow_road_neon_frames_skipped": len(rainbow_frame_skipped),
         "tkmk00_entries": len(tkmk_exported),
         "working_manifests_preserved": [
             "kart_sprite_manifest.json",
@@ -2861,6 +2974,45 @@ def main():
         runtime_copied = copy_runtime_manifests(root, outdir)
         print(f"Manifestos runtime sincronizados: {runtime_copied}")
         generated_tinted = ask_generate_hd_menu_backgrounds(root, outdir)
+        # Mesmo no modo continuação, os frames dos neons precisam ser
+        # regenerados a partir da ROM/manifesto, sem sobrescrever qualquer
+        # PNG HD já existente. Isso mantém o fluxo seguro para uma extração
+        # que já foi editada pelo usuário.
+        rainbow_cache = {}
+        rainbow_frames, rainbow_frame_skipped = extract_rainbow_road_neon_frames(
+            root, rom, outdir, rainbow_cache, overwrite=False
+        )
+        rainbow_manifest_path = outdir / "rainbow_road_neon_frames_manifest.json"
+        rainbow_manifest_path.write_text(
+            json.dumps(rainbow_frames, indent=1), encoding="utf-8"
+        )
+        (outdir / "rainbow_road_neon_frames_skipped.json").write_text(
+            json.dumps(rainbow_frame_skipped, indent=1), encoding="utf-8"
+        )
+        print(f"Rainbow Road neon: {len(rainbow_frames)} frames visuais verificados -> {outdir / 'generated' / 'asset_json' / 'rainbow_road' / 'rainbow_road' / 'frames'}")
+
+        # O manifesto consolidado é a fonte usada pelo PACK_TEXTURES.
+        # Adiciona/atualiza somente os frames Rainbow Road, preservando tudo
+        # que já existe na extração e qualquer outra textura HD do usuário.
+        consolidated_path = outdir / "generated_texture_manifest.json"
+        try:
+            consolidated = json.loads(consolidated_path.read_text(encoding="utf-8")) if consolidated_path.is_file() else []
+        except Exception:
+            consolidated = []
+        rainbow_pngs = {item.get("png") for item in rainbow_frames if item.get("png")}
+        consolidated = [item for item in consolidated if item.get("png") not in rainbow_pngs]
+        consolidated.extend(rainbow_frames)
+        consolidated_path.write_text(json.dumps(consolidated, indent=1), encoding="utf-8")
+
+        asset_manifest_path = outdir / "asset_json_texture_manifest.json"
+        try:
+            asset_manifest = json.loads(asset_manifest_path.read_text(encoding="utf-8")) if asset_manifest_path.is_file() else []
+        except Exception:
+            asset_manifest = []
+        asset_manifest = [item for item in asset_manifest if item.get("png") not in rainbow_pngs]
+        asset_manifest.extend(rainbow_frames)
+        asset_manifest_path.write_text(json.dumps(asset_manifest, indent=1), encoding="utf-8")
+
         # Só depois da geração o tinted_manifest passa a ser copiado para
         # extracted_textures. Se não foi gerado, ele não é inventado.
         runtime_copied = copy_runtime_manifests(root, outdir, include_tinted=bool(generated_tinted))
@@ -3077,6 +3229,21 @@ def main():
 
     print(f"Bancos: {generated_count} texturas verificadas -> {outdir / 'generated'}")
     print(f"Assets JSON extras: {len(asset_json_extra)} texturas novas verificadas -> {outdir / 'generated' / 'asset_json'}")
+    # Os frames foram gerados dentro de extract_generated_textures(); o main
+    # apenas lê o manifesto produzido para exibir o resumo.
+    rainbow_manifest_path = outdir / "rainbow_road_neon_frames_manifest.json"
+    rainbow_skipped_path = outdir / "rainbow_road_neon_frames_skipped.json"
+    try:
+        rainbow_frames_report = json.loads(rainbow_manifest_path.read_text(encoding="utf-8")) if rainbow_manifest_path.is_file() else []
+    except Exception:
+        rainbow_frames_report = []
+    try:
+        rainbow_frame_skipped_report = json.loads(rainbow_skipped_path.read_text(encoding="utf-8")) if rainbow_skipped_path.is_file() else []
+    except Exception:
+        rainbow_frame_skipped_report = []
+    print(f"Rainbow Road neon: {len(rainbow_frames_report)} frames visuais extraídos -> {outdir / 'generated' / 'asset_json' / 'rainbow_road' / 'rainbow_road' / 'frames'}")
+    if rainbow_frame_skipped_report:
+        print(f"  ! Frames neon ignorados: {len(rainbow_frame_skipped_report)} (motivos em rainbow_road_neon_frames_skipped.json)")
     if asset_json_skipped:
         print(f"  ! Assets JSON ignorados: {len(asset_json_skipped)} (motivos em asset_json_texture_skipped.json)")
     runtime_manifest_path = outdir / "runtime_derived_manifest.json"
