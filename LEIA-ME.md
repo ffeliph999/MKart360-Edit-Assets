@@ -2,12 +2,12 @@
 
 Fork do [sirdankz/MKart360](https://github.com/sirdankz/MKart360) (port de
 Mario Kart 64 para Xbox 360, baseado na decompilação
-[n64decomp/mk64](https://github.com/n64decomp/mk64)). Este fork funciona com
+[n64decomp/mk64](https://github.com/n64decomp/mk64)). Este fork adiciona um 
+**sistema de substituição de texturas HD em tempo de execução**,
+sem modificar a ROM nem os assets compilados do jogo, e funciona com
 **ROMs de todas as regiões** graças ao meu amigo
 **[Eduardo](https://github.com/EduDicaseGameplay)**, do canal do YouTube
-**[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)**, e
-adiciona um **sistema de substituição de texturas HD em tempo de execução**,
-sem modificar a ROM nem os assets compilados do jogo.
+**[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)**
 
 ---
 
@@ -48,8 +48,10 @@ sem modificar a ROM nem os assets compilados do jogo.
 - Texturas em resolução muito alta (acima de HQ) podem sobrecarregar o
   hardware do Xbox 360 e causar travamentos ou problemas de desempenho; o
   suporte a HD existe, mas é limitado ao hardware do console.
-- Foi descoberto que ao executar o jogo com um tex.pak em discos rígidos mecânicos sejam internos ou externos pode causar pequenos travamentos durante o jogo, o desempenho pode variar, recomenda-se o uso de pen drives ou SSDs.
-- A compressão DXT tem perda: ela reduz muito o `tex.pak`, mas pode deixar
+- Foi descoberto que ao executar o jogo com um tex.pak em discos rígidos mecânicos,
+  sejam internos ou externos, pode causar pequenos travamentos durante o jogo, 
+  o desempenho pode variar, recomenda-se o uso de pen drives ou SSDs.
+- A compressão DXT tem perda: ela reduz muito o tamanho do `tex.pak`, mas pode deixar
   granulação/faixas visíveis e pequenas alterações de cor (veja
   [tex.pak comprimido](#texpak-comprimido-dxt-opcional)).
 
@@ -121,14 +123,15 @@ sem modificar a ROM nem os assets compilados do jogo.
 
 ## Novas ferramentas
 
-Todos os scripts abaixo ficam em `mk64-master/` e são executados de dentro
-dessa pasta.
+Todos os scripts abaixo precisam ser executados de dentro
+da pasta `mk64-master/`, os que foram criados para diagnóstico/debug e testes ficam na pasta `legacy_diagnostic_tools/`
+mas para funcionarem, precisam ser movidos para `mk64-master/`, com exceção de `HALVE_PNGS.py` que funciona em qualquer lugar
 
 | Arquivo | Função |
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extrai as texturas da ROM em PNGs editáveis |
 | `PACK_TEXTURES.py` | Empacota os PNGs editados no formato que o jogo lê (`tex.pak`) |
-| `HALVE_PNGS.py` | Reduz a resolução dos PNGs pela metade, para caber na memória do console |
+| `HALVE_PNGS.py` | Reduz a resolução de PNGs HD pela metade, para caber na memória do console, use se tiver problemas de desempenho |
 | `SCAN_HALVES.py` | Ferramenta de diagnóstico: descobre onde ficam as "metades de baixo" dos sprites de kart quando o hash não bate |
 | `CROSS_CHECK.py` | Cruza o log de trace do jogo com os manifests para achar texturas não encontradas |
 | `SCAN_MENU.py` | Mede, a partir de um log de trace, como o jogo divide as imagens grandes de menu em blocos |
@@ -165,8 +168,9 @@ novo — ele só preenche o que falta). Use `--force` para regerar tudo do zero
 **2. Editar**
 
 Abra os PNGs e redesenhe/amplie em HD. A resolução pode ser alterada
-livremente (por exemplo, 256×256 no lugar de um original de 64×64). **Não
-renomeie os arquivos** — o nome (ou o caminho registrado no manifest) é o que
+livremente dentro dos limites de memória do console (por exemplo, 128×128 no lugar de um original de 64×64), geralmente é 
+seguro utilizar texturas com o dobro da resolução das originais, e até o triplo, mas o quadruplo pode causar problemas de desempenho. **Não
+renomeie os arquivos PNG** — o nome (ou o caminho registrado no manifest) é o que
 liga a textura editada à original.
 
 **3. Empacotar**
@@ -200,10 +204,10 @@ baserom.us.z64
 tex.pak          <- aqui, NÃO dentro de uma pasta tex\
 ```
 
-Trocar texturas não exige recompilar — o `tex.pak` é lido em tempo de
+Trocar texturas não exige recompilar o executavel .xex — o `tex.pak` é lido em tempo de
 execução. Só é preciso recompilar quando o código C muda.
 
-### tex.pak comprimido (DXT, opcional)
+### tex.pak comprimido (DXT, opcional e experimental)
 
 ```powershell
 pip install numpy
@@ -235,7 +239,7 @@ Limitações:
 ### Limites de memória
 
 O Xbox 360 tem 512 MB compartilhados entre sistema e vídeo. O elenco completo
-de personagens soma 2568 sprites (2 arquivos cada):
+de personagens/karts soma 2568 sprites (2 arquivos cada):
 
 | Resolução | Total estimado | Observação |
 |---|---|---|
@@ -353,6 +357,11 @@ mk64-master\baserom.us.z64
 ```
 
 Depois, dentro de `mk64-master`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\xbox360\setup_windows_asset_tools.ps1" -SkipTorch
+```
+Espere as Ferramentas necessárias baixarem, em seguida:
 
 ```powershell
 py ".\PUBLIC_PREPARE_MK64_ASSETS.py"

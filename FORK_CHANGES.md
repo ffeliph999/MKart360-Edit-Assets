@@ -22,8 +22,6 @@ HD em tempo de execucao, sem alterar a ROM nem os assets compilados.
 - `menu_tiles_geometry.json` — geometria medida dos blocos (so coordenadas)
 - `TEXTURAS_HD_COMO_USAR.md` — guia de uso
 
-## Conhecido
-- Retratos da selecao de personagens: substituidos. Imagens TKMK00 (tela
-  inicial, nomes) ainda nao.
-- Janelas de TMEM do Lakitu (56x72) seguem a regra medida nos karts, sem
-  medicao propria.
+## Bugs Conhecidos
+- Por agora, nenhum
+

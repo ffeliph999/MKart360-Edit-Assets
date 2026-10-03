@@ -2,9 +2,8 @@
 
 Fork of [sirdankz/MKart360](https://github.com/sirdankz/MKart360) (Xbox 360
 port of Mario Kart 64, based on the [n64decomp/mk64](https://github.com/n64decomp/mk64)
-decompilation). This fork works with **all ROM regions** thanks to my personal friend **[Eduardo](https://github.com/EduDicaseGameplay)** from the YouTube channel **[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)**, and adds a
-**runtime HD texture replacement system**, without modifying the ROM or the
-compiled game assets.
+decompilation). This fork adds a **runtime HD texture replacement system**,
+without modifying the ROM or the compiled game assets, and works with **all ROM regions** thanks to my personal friend **[Eduardo](https://github.com/EduDicaseGameplay)** from the YouTube channel **[Edu Dicas e Gameplay](https://www.youtube.com/@EduDicaseGameplay)**,
 
 ---
 
@@ -114,14 +113,13 @@ compiled game assets.
 
 ## New tools
 
-All scripts below live in `mk64-master/` and are run from inside that
-folder.
+All the scripts below must be executed from within the `mk64-master/` folder; those created for diagnostics/debugging and testing are located in the `legacy_diagnostic_tools/` folder but must be moved to `mk64-master/` to work—with the exception of `HALVE_PNGS.py`, which works from any location.
 
 | File | Purpose |
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extracts textures from the ROM into editable PNGs |
 | `PACK_TEXTURES.py` | Packs edited PNGs back into the format the game reads (`tex.pak`) |
-| `HALVE_PNGS.py` | Halves PNG resolution, to fit the console's memory |
+| `HALVE_PNGS.py` | Halves PNG resolution, to fit the console's memory, Use this for very large textures or if you encounter performance issues.|
 | `SCAN_HALVES.py` | Diagnostic tool: finds where the "bottom halves" of kart sprites live when their hash doesn't match |
 | `CROSS_CHECK.py` | Cross-references the game's trace log with the manifests to find textures that weren't found |
 | `SCAN_MENU.py` | Measures how the game splits large menu images into blocks, from a trace log |
@@ -159,7 +157,7 @@ from scratch (discards your edits). Other options: `--no-karts`,
 **2. Edit**
 
 Open the PNGs and redraw/upscale them in HD. You can freely change the
-resolution (e.g. 256×256 instead of a 64×64 original). **Don't rename the
+resolution (e.g. 128×128 instead of a 64×64 original). **Don't rename the
 files** — the name (or the path recorded in the manifest) is what links the
 edited texture back to the original.
 
@@ -195,7 +193,7 @@ baserom.us.z64
 tex.pak          <- here, NOT inside a tex\ folder
 ```
 
-Swapping textures doesn't require recompiling — `tex.pak` is read at
+Swapping textures doesn't require recompiling .XEX file — `tex.pak` is read at
 runtime. Recompiling is only needed when you change C code.
 
 ### Compressed tex.pak (DXT, optional)
@@ -346,6 +344,11 @@ mk64-master\baserom.us.z64
 ```
 
 Then, inside `mk64-master`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\xbox360\setup_windows_asset_tools.ps1" -SkipTorch
+```
+Wait for all the necessary requirements to download and install, and then:
 
 ```powershell
 py ".\PUBLIC_PREPARE_MK64_ASSETS.py"
