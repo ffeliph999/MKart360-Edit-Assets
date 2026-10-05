@@ -170,14 +170,14 @@ quality without using as much memory as 256×256.
 If you only modified one texture folder, such as the karts, run:
 
 ```powershell
-py .\PACK_TEXTURES.py --only karts --pak
+py .\PACK_TEXTURES.py --only karts --pak --dxt
 ```
 
 If you modified textures from multiple folders or all texture folders,
 run:
 
 ```powershell
-py .\PACK_TEXTURES.py --pak
+py .\PACK_TEXTURES.py --pak --dxt
 ```
 
 The process creates:
@@ -193,6 +193,10 @@ This is a single file containing the packed textures.
 `--pak`
 
 Creates a single `tex.pak` file. Recommended.
+
+`--dxt`
+
+generates a compressed tex.pak using the DXT algorithm (natively supported by xbox360)
 
 `--only PREFIX`
 

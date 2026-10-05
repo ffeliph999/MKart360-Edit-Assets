@@ -169,14 +169,14 @@ visual sem utilizar tanta memória quanto 256×256.
 Se você modificou apenas uma pasta de texturas, como os karts, execute:
 
 ```powershell
-py .\PACK_TEXTURES.py --only karts --pak
+py .\PACK_TEXTURES.py --only karts --pak --dxt
 ```
 
 Se você modificou texturas de várias pastas ou de todas as pastas de
 texturas, execute:
 
 ```powershell
-py .\PACK_TEXTURES.py --pak
+py .\PACK_TEXTURES.py --pak --dxt
 ```
 
 O processo cria:
@@ -192,6 +192,10 @@ Esse é um único arquivo contendo as texturas empacotadas.
 `--pak`
 
 Cria um único arquivo `tex.pak`. Recomendado.
+
+`--dxt`
+
+Gera um tex.pak comprimido utilizando o algorítmo DXT, (nativamente suportado pelo xbox360) (altamente recomendado para pacotes de textura em HD com texturas acima de 256x256 pixels)
 
 `--only PREFIX`
 
@@ -228,6 +232,12 @@ subpastas.
 
 O formato `.pak` é recomendado para a versão final. Os arquivos `.tex`
 individuais podem ser úteis para testes ou depuração.
+
+A compactação DXT é recomendada para texturas muito grandes, acima de 256x256,
+se o seu pacote de texturas tem no total mais de 200MB, é altamente recomendado
+utilizar o --dxt, pois vai gerar um tex.pak muito menor, e vai ser menos pesado
+para o xbox360 processar, mas atenção, texturas muito pequenas tendem a ficar
+piores com o DXT, por que ele é um formato de compressão com perdas.
 
 **IMPORTANTE:**
 
