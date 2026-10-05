@@ -571,16 +571,22 @@ def load_asset_json_symbols(root):
                 base = re.sub(r'\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)$', '', base, flags=re.I)
                 add(base, info, fmt_hint)
 
-    other_s = root / "data" / "other_textures.s"
-    if other_s.is_file():
+    # Vincula símbolos dos bancos .s aos metadados do assets.json também fora
+    # de other_textures.s. Alguns recursos gerados usam nomes diferentes entre
+    # o arquivo-fonte e o símbolo C (por exemplo text_game_data.ia16 ->
+    # gTextureTextGameData). Sem essa ponte, a informação explícita de formato
+    # (.ia16/.rgba16/etc.) se perde e o extrator acaba inferindo apenas pelo
+    # tamanho em bytes, confundindo IA16 com RGBA16.
+    for s_path in (root / "data").rglob("*.s"):
         try:
-            text = other_s.read_text(encoding="utf-8", errors="ignore")
+            text = s_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
-            text = ""
+            continue
         for generated_symbol, inc in re.findall(
                 r"glabel\s+([A-Za-z_][A-Za-z0-9_]*)\s*\n\s*\.incbin\s+\"([^\"]+)\"",
                 text):
-            base = Path(inc.replace("\\", "/")).name
+            clean_inc = inc.replace("\\", "/")
+            base = Path(clean_inc).name
             base = re.sub(r"\.(png|mio0|inc\.c)$", "", base, flags=re.I)
             base = re.sub(
                 r"\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4|tlut)$",
