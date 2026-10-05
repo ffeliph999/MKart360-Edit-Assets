@@ -1810,11 +1810,46 @@ void func_802A74BC(void) {
     }
 }
 
+#ifdef XBOX360_PORT
+/* MKart360-Edit-Assets: telao do Luigi Raceway e do Wario Stadium.
+   No N64 o jogo copia um pedaco da imagem da tela (framebuffer em RDRAM) para a
+   textura do telao. No Xbox 360 a imagem e desenhada pela GPU e esse framebuffer
+   nunca e preenchido -- o telao ficava branco. O renderer fornece o pedaco a
+   partir de uma captura recente da tela (xbox360_renderer.cpp). */
+#ifdef __cplusplus
+extern "C"
+#endif
+int x360_capture_n64_region(int x, int y, int w, int h, u16* target);
+/* No port o desenho le as texturas da pista de uma copia diferente da que o jogo
+   grava (gSegmentTable[5]); o gfx_pc.c desvia os 6 blocos do telao para esta. */
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_set_ram_seg5(uintptr_t base, uintptr_t bloco);
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_gravado(uintptr_t base, uintptr_t bloco, const void* dados, int bytes);
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_contexto(int modo, uintptr_t base);
+#endif
+
 void copy_framebuffer(s32 arg0, s32 arg1, s32 width, s32 height, u16* source, u16* target) {
     s32 var_v1;
     s32 var_a1;
     s32 targetIndex;
     s32 sourceIndex;
+#ifdef XBOX360_PORT
+    x360_telao_set_ram_seg5((uintptr_t) PHYSICAL_TO_VIRTUAL(gSegmentTable[5]), (uintptr_t) target);
+    x360_telao_contexto(gActiveScreenMode, (uintptr_t) PHYSICAL_TO_VIRTUAL(gSegmentTable[5]));
+    if (x360_capture_n64_region(arg0, arg1, width, height, target)) {
+        x360_telao_gravado((uintptr_t) PHYSICAL_TO_VIRTUAL(gSegmentTable[5]), (uintptr_t) target,
+                           target, width * height * 2);
+        return;
+    }
+#endif
 
     targetIndex = 0;
     for (var_v1 = 0; var_v1 < height; var_v1++) {

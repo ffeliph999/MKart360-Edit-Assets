@@ -218,37 +218,142 @@ def _pack565(rgb):
     return (r << 11) | (g << 5) | b
 
 
-def _bloco_cor(px, opaco, modo3):
-    """px: (N,16,3) int32; opaco: (N,16) bool. Devolve (c0,c1,idx) uint32
-    usando exatamente a mesma paleta (inteira) do decodificador do console."""
+# Codificador de qualidade (versao 2): eixo principal das cores do bloco +
+# refinamento das duas cores por minimos quadrados, guardando a melhor
+# tentativa. Medido em fotos reais: +1,1 a +2,1 dB de PSNR sobre o codificador
+# anterior, a 0,3-0,5 dB de um codificador profissional (rgbcx). A paleta usada
+# para escolher os indices e exatamente a do decodificador do console.
+def _paleta(c0, c1, modo3):
     import numpy as np
-    big = np.where(opaco[..., None], px, -1)
-    sml = np.where(opaco[..., None], px, 999)
-    mx = big.max(1).astype(np.float64); mn = sml.min(1).astype(np.float64)
-    vazio = ~opaco.any(1)
-    mx[vazio] = 0; mn[vazio] = 0
-    inset = (mx - mn) / 16.0
-    a = _pack565(mx - inset); b = _pack565(mn + inset)
-    if modo3:   # 3 cores + transparente: exige c0 <= c1
-        c0 = np.minimum(a, b); c1 = np.maximum(a, b)
-    else:       # 4 cores: exige c0 > c1 (iguais -> indice 0 em tudo)
-        c0 = np.maximum(a, b); c1 = np.minimum(a, b)
     e0 = _expand565(c0); e1 = _expand565(c1)
     if modo3:
-        pal = np.stack([e0, e1, (e0 + e1) // 2], 1)                    # (N,3,3)
-    else:
-        pal = np.stack([e0, e1, (2 * e0 + e1) // 3, (e0 + 2 * e1) // 3], 1)
-    d = ((px[:, :, None, :] - pal[:, None, :, :]) ** 2).sum(-1)       # (N,16,k)
+        return np.stack([e0, e1, (e0 + e1) // 2], 1)
+    return np.stack([e0, e1, (2 * e0 + e1) // 3, (e0 + 2 * e1) // 3], 1)
+
+def _indices(px, opaco, c0, c1, modo3):
+    import numpy as np
+    pal = _paleta(c0, c1, modo3)
+    d = ((px[:, :, None, :] - pal[:, None, :, :]) ** 2).sum(-1)
     idx = d.argmin(-1).astype(np.uint32)
+    err = np.where(opaco, d.min(-1), 0).sum(1)
     if modo3:
         idx = np.where(opaco, idx, 3)
-    else:
-        idx = np.where((c0 == c1)[:, None], 0, idx)
-    return c0, c1, idx
+    return idx, err
+
+def _ordena(a, b, modo3):
+    import numpy as np
+    if modo3:
+        return np.minimum(a, b), np.maximum(a, b)
+    return np.maximum(a, b), np.minimum(a, b)
+
+def _bloco_cor(px, opaco, modo3, iters=3):
+    import numpy as np
+    """px (N,16,3) int32; opaco (N,16) bool. Eixo principal + refinamento por
+    minimos quadrados; guarda, por bloco, a melhor tentativa."""
+    N = px.shape[0]
+    w = opaco.astype(np.float64)
+    pf = px.astype(np.float64)
+    sw = np.maximum(w.sum(1), 1e-9)
+    mean = (pf * w[..., None]).sum(1) / sw[:, None]
+    d = (pf - mean[:, None, :]) * w[..., None]
+    cov = np.einsum('nki,nkj->nij', d, pf - mean[:, None, :])
+    v = np.ones((N, 3)) / np.sqrt(3)
+    for _ in range(8):
+        v = np.einsum('nij,nj->ni', cov, v)
+        v /= np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-9)
+    proj = ((pf - mean[:, None, :]) * v[:, None, :]).sum(-1)
+    pmax = np.where(opaco, proj, -1e9).max(1); pmin = np.where(opaco, proj, 1e9).min(1)
+    vazio = ~opaco.any(1)
+    pmax[vazio] = 0; pmin[vazio] = 0
+    e0 = mean + v * pmax[:, None]; e1 = mean + v * pmin[:, None]
+
+    best_c0 = best_c1 = best_idx = None
+    best_err = np.full(N, np.inf)
+    for it in range(iters + 1):
+        c0, c1 = _ordena(_pack565(e0), _pack565(e1), modo3)
+        idx, err = _indices(px, opaco, c0, c1, modo3)
+        if not modo3:
+            igual = c0 == c1
+            idx = np.where(igual[:, None], 0, idx)
+        melhor = err < best_err
+        if best_c0 is None:
+            best_c0, best_c1, best_idx = c0.copy(), c1.copy(), idx.copy()
+        else:
+            best_c0 = np.where(melhor, c0, best_c0); best_c1 = np.where(melhor, c1, best_c1)
+            best_idx = np.where(melhor[:, None], idx, best_idx)
+        best_err = np.minimum(best_err, err)
+        if it == iters:
+            break
+        # minimos quadrados: x = a*e0 + b*e1, com (a,b) dados pelo indice
+        if modo3:
+            ta = np.array([1.0, 0.0, 0.5, 0.0]); tb = 1.0 - ta; tb[3] = 0.0
+        else:
+            ta = np.array([1.0, 0.0, 2 / 3, 1 / 3]); tb = 1.0 - ta
+        a = ta[idx] * w; b = tb[idx] * w
+        aa = (a * a).sum(1); bb = (b * b).sum(1); ab = (a * b).sum(1)
+        ax = (a[..., None] * pf).sum(1); bx = (b[..., None] * pf).sum(1)
+        det = aa * bb - ab * ab
+        ok = np.abs(det) > 1e-6
+        detS = np.where(ok, det, 1.0)
+        n0 = (bb[:, None] * ax - ab[:, None] * bx) / detS[:, None]
+        n1 = (aa[:, None] * bx - ab[:, None] * ax) / detS[:, None]
+        e0 = np.where(ok[:, None], n0, e0); e1 = np.where(ok[:, None], n1, e1)
+    return best_c0, best_c1, best_idx
 
 
-def dxt_encode(raw, w, h):
-    """Devolve (fmt, bytes) com fmt 1 = DXT1, 2 = DXT5."""
+def _grupo_origem(origem):
+    """Agrupa a origem de uma textura (caminho do PNG + anotacao) por pasta."""
+    caminho = origem.split(" [")[0].replace("\\", "/")
+    partes = [p for p in caminho.split("/") if p]
+    if len(partes) >= 3 and partes[0] == "karts":
+        return "karts/" + partes[1]
+    return "/".join(partes[:2]) if len(partes) > 1 else (partes[0] if partes else "(sem origem)")
+
+
+def _relatorio_sem_dxt(sem_dxt, caminho):
+    """Resume e grava a lista das texturas que ficaram sem DXT (dimensoes que nao
+    sao multiplas de 4 depois do recorte/escala)."""
+    from collections import defaultdict
+    total = sum(b for _, _, _, b, _ in sem_dxt)
+    por_grupo = defaultdict(lambda: [0, 0])
+    por_tam = defaultdict(lambda: [0, 0])
+    for hh, w, h, b, origem in sem_dxt:
+        g = por_grupo[_grupo_origem(origem)]; g[0] += 1; g[1] += b
+        t = por_tam[(w, h)]; t[0] += 1; t[1] += b
+    print(f"  sem compressao: {len(sem_dxt)} texturas, {total/1024/1024:.1f} MB "
+          f"(dimensoes finais nao multiplas de 4)")
+    print("  maiores grupos (por memoria):")
+    for nome, (n, b) in sorted(por_grupo.items(), key=lambda kv: -kv[1][1])[:6]:
+        print(f"    {b/1024/1024:7.2f} MB  {n:5d}  {nome}")
+    linhas = [f"{len(sem_dxt)} texturas sem DXT, {total/1024/1024:.2f} MB", "",
+              "== por grupo (MB, quantidade)"]
+    linhas += [f"  {b/1024/1024:8.2f} MB {n:6d}  {nome}"
+               for nome, (n, b) in sorted(por_grupo.items(), key=lambda kv: -kv[1][1])]
+    linhas += ["", "== tamanhos mais comuns (LxA: quantidade, MB)"]
+    linhas += [f"  {w}x{h}: {n}, {b/1024/1024:.2f} MB"
+               for (w, h), (n, b) in sorted(por_tam.items(), key=lambda kv: -kv[1][1])[:40]]
+    linhas += ["", "== todas (hash  LxA  origem)"]
+    linhas += [f"  {hh}  {w}x{h}  {origem}" for hh, w, h, b, origem in sorted(sem_dxt, key=lambda x: -x[3])]
+    caminho.write_text("\n".join(linhas), encoding="utf-8")
+    print(f"  lista completa: {caminho}")
+
+
+def _ajusta_multiplo4(raw, w, h):
+    """Reamostra um recorte RGBA para o multiplo de 4 IMEDIATAMENTE ACIMA em cada
+    dimensao (exigencia do DXT). O jogo estica cada textura HD para cobrir a area da
+    original, qualquer que seja o tamanho dela, entao a textura continua cobrindo a
+    mesma area -- so ganha algumas linhas/colunas reamostradas."""
+    from PIL import Image
+    nw, nh = max(4, (w + 3) // 4 * 4), max(4, (h + 3) // 4 * 4)
+    img = Image.frombytes("RGBA", (w, h), bytes(raw))
+    return img.resize((nw, nh), Image.BICUBIC).tobytes(), nw, nh
+
+
+def dxt_encode(raw, w, h, compacto=False):
+    """Devolve (fmt, bytes) com fmt 1 = DXT1, 2 = DXT5.
+    Opaca -> DXT1. Com transparencia -> DXT5 (4 cores por bloco + alfa
+    separado: +1,7 dB de cor medido em sprites). Com compacto=True, texturas
+    de transparencia binaria vao para DXT1 (metade do tamanho, 3 cores)."""
     import numpy as np
     a = np.frombuffer(raw, np.uint8).reshape(h, w, 4).astype(np.int32)
     blk = a.reshape(h // 4, 4, w // 4, 4, 4).transpose(0, 2, 1, 3, 4).reshape(-1, 16, 4)
@@ -256,7 +361,7 @@ def dxt_encode(raw, w, h):
     if alfa.min() >= 250:
         fmt, modo3 = 1, False
         opaco = np.ones(alfa.shape, bool)
-    elif ((alfa <= 8) | (alfa >= 247)).all():
+    elif compacto and ((alfa <= 8) | (alfa >= 247)).all():
         fmt, modo3 = 1, True
         opaco = alfa >= 128
     else:
@@ -295,6 +400,11 @@ def main():
     ap.add_argument("--dxt", action="store_true",
                     help="com --pak: comprime as texturas em DXT1/DXT5 (4-8x menor). "
                          "Exige o gfx_pc.c com suporte a DXT.")
+    ap.add_argument("--dxt-sem-ajuste", action="store_true",
+                    help="com --dxt: NAO reamostra recortes fora de multiplos de 4 (ficam sem compressao)")
+    ap.add_argument("--dxt-compacto", action="store_true",
+                    help="com --dxt: sprites de transparencia binaria em DXT1 (menor, "
+                         "menos cores); o padrao e DXT5 (melhor qualidade)")
     ap.add_argument("--pak", action="store_true",
                     help="gera UM arquivo tex.pak em vez de milhares de .tex soltos. "
                          "Evita milhares de aberturas de arquivo em runtime (causa dos "
@@ -723,15 +833,24 @@ def main():
         index, blob, cur = b"", [], data_off
         cont = {0: 0, 1: 0, 2: 0}
         antes = depois = 0
+        sem_dxt = []          # (hash, w, h, bytes, origem) das que ficaram sem compressao
+        n_ajustadas = 0
         if a.dxt:
             print(f"comprimindo {len(PAK_ENTRIES)} texturas em DXT...")
         for n_i, k in enumerate(ordem, 1):
             hh, w, h, raw = PAK_ENTRIES[k]
+            tam_orig = len(raw)
             fmt, dados = 0, raw
+            if (a.dxt and not a.dxt_sem_ajuste and (w % 4 or h % 4)
+                    and hh.lower() not in DXT_NUNCA):
+                raw, w, h = _ajusta_multiplo4(raw, w, h)
+                n_ajustadas += 1
             if a.dxt and w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
-                fmt, dados = dxt_encode(raw, w, h)
+                fmt, dados = dxt_encode(raw, w, h, compacto=a.dxt_compacto)
             cont[fmt] += 1
-            antes += len(raw); depois += len(dados)
+            antes += tam_orig; depois += len(dados)
+            if a.dxt and fmt == 0:
+                sem_dxt.append((hh, w, h, len(raw), _PAK_SOURCE.get(hh, "")))
             campo = fmt | (0x80000000 if k in pre_set else 0)
             index += struct.pack(">IIIIII", int(hh, 16), cur, len(dados), w, h, campo)
             blob.append(dados)
@@ -741,6 +860,10 @@ def main():
         if a.dxt:
             print(f"DXT: {cont[1]} DXT1, {cont[2]} DXT5, {cont[0]} sem compressao "
                   f"| {antes/1024/1024:.0f} MB -> {depois/1024/1024:.0f} MB")
+            if n_ajustadas:
+                print(f"  {n_ajustadas} recorte(s) reamostrado(s) para multiplos de 4 para poder comprimir")
+            if sem_dxt:
+                _relatorio_sem_dxt(sem_dxt, outdir / "dxt_sem_compressao.txt")
         print(f"pre-carregamento dos menus: {len(pre_idx)} texturas, "
               f"{pre_bytes/1024/1024:.1f} MB (limite {PRELOAD_MB} MB)")
         with open(pak, "wb") as f:

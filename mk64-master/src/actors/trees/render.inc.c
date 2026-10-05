@@ -173,7 +173,12 @@ void func_80299864(Camera* camera, Mat4 arg1, struct Actor* arg2) {
         // Based on the TLUT being loaded above, this ought to be be another
         // tree related DL, presumably one found in a course other than Moo Moo farm
         //                                 0x0600FC70
-        gSPDisplayList(gDisplayListHead++, d_course_moo_moo_farm_mole_tlut);
+        // MKart360-Edit-Assets: no N64, 0x0600FC70 e relativo ao segmento 6 (a
+        // pista CARREGADA). Este ator (0x1A) so existe no Luigi Raceway, onde esse
+        // endereco e a arvore d_course_luigi_raceway_dl_FC70. O port resolvia o
+        // nome para o dado da Moo Moo Farm e as arvores do Luigi nao apareciam
+        // (so as sombras).
+        gSPDisplayList(gDisplayListHead++, d_course_luigi_raceway_dl_FC70);
     }
 }
 

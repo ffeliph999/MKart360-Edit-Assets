@@ -609,6 +609,19 @@ static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_
    bytes da CPU (o Xenon e big-endian; o formato DXT e little-endian). */
 static uint8_t x360_dxt_raw[2048 * 2048];   /* maior caso: DXT5 2048x2048 */
 
+/* 1 = texturas DXT vao COMPRIMIDAS para a GPU (o Xbox 360 le DXT nativamente):
+       4-8x menos memoria de video e nada de descompressao na CPU.
+   0 = descomprime na CPU e envia RGBA (comportamento anterior). */
+#define X360_DXT_GPU 1
+#if X360_DXT_GPU
+/* definida com extern "C" em xbox360_renderer.cpp; este arquivo e compilado
+   como C++ no projeto, entao a declaracao precisa pedir o nome de C */
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_upload_texture_dxt(const uint8_t *data, int w, int h, int fmt);
+#endif
+
 static void x360_rgb565(uint32_t c, uint8_t *o) {
     uint32_t r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
     o[0] = (uint8_t)((r << 3) | (r >> 2));
@@ -834,12 +847,14 @@ static bool x360_pak_read(uint32_t hash, uint32_t *w, uint32_t *h) {
             return false;
         if (!x360_pak_fetch(e->off, e->size, dest))
             return false;
+#if !X360_DXT_GPU
         if (e->fmt != 0) {
             LARGE_INTEGER td;
             QueryPerformanceCounter(&td);
             x360_dxt_decode(x360_dxt_raw, e->w, e->h, e->fmt, x360_hd_buf);
             x360_st_dec_us += x360_us_since(&td);
         }
+#endif
         x360_pak_last_fmt = e->fmt;
         x360_pak_last_size = e->size;
         *w = e->w; *h = e->h;
@@ -1080,6 +1095,28 @@ static void x360_preload_step(void) {
 #endif
 }
 
+/* Envia uma textura HD a GPU: RGBA direto; DXT comprimido (X360_DXT_GPU) ou
+   descomprimido na CPU. */
+static void x360_hd_upload(const uint8_t *data, uint32_t w, uint32_t h, uint8_t fmt) {
+    LARGE_INTEGER tu;
+    if (fmt != 0) {
+#if X360_DXT_GPU
+        QueryPerformanceCounter(&tu);
+        x360_upload_texture_dxt(data, (int)w, (int)h, (int)fmt);
+        x360_st_up_us += x360_us_since(&tu);
+        return;
+#else
+        QueryPerformanceCounter(&tu);
+        x360_dxt_decode(data, w, h, fmt, x360_hd_buf);
+        x360_st_dec_us += x360_us_since(&tu);
+        data = x360_hd_buf;
+#endif
+    }
+    QueryPerformanceCounter(&tu);
+    gfx_rapi->upload_texture(data, w, h);
+    x360_st_up_us += x360_us_since(&tu);
+}
+
 static bool x360_try_load_hd_texture(uint32_t hash) {
     if (x360_hdtex_lookup(hash) == X360_HDTEX_ST_MISS) return false;
 
@@ -1089,19 +1126,8 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
         x360_hdram[slot].last_used = ++x360_hdram_clock;
         ++x360_st_ramhit; ++x360_st_up;
         x360_st_upkb += (x360_hdram[slot].w * x360_hdram[slot].h * 4) >> 10;
-        LARGE_INTEGER tu;
-        if (x360_hdram[slot].fmt != 0) {
-            QueryPerformanceCounter(&tu);
-            x360_dxt_decode(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h,
-                            x360_hdram[slot].fmt, x360_hd_buf);
-            x360_st_dec_us += x360_us_since(&tu);
-            QueryPerformanceCounter(&tu);
-            gfx_rapi->upload_texture(x360_hd_buf, x360_hdram[slot].w, x360_hdram[slot].h);
-        } else {
-            QueryPerformanceCounter(&tu);
-            gfx_rapi->upload_texture(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h);
-        }
-        x360_st_up_us += x360_us_since(&tu);
+        x360_hd_upload(x360_hdram[slot].data, x360_hdram[slot].w, x360_hdram[slot].h,
+                       x360_hdram[slot].fmt);
         return true;
     }
 
@@ -1137,10 +1163,8 @@ static bool x360_try_load_hd_texture(uint32_t hash) {
                                      (uint8_t)x360_pak_last_fmt);
             else
                 x360_hdram_store(hash, pw, ph, x360_hd_buf, pw * ph * 4);
-            LARGE_INTEGER tu;
-            QueryPerformanceCounter(&tu);
-            gfx_rapi->upload_texture(x360_hd_buf, pw, ph);
-            x360_st_up_us += x360_us_since(&tu);
+            x360_hd_upload(x360_pak_last_fmt ? x360_dxt_raw : x360_hd_buf, pw, ph,
+                           (uint8_t)x360_pak_last_fmt);
             x360_hdtex_remember(hash, X360_HDTEX_ST_HIT);
             return true;
         }
@@ -2037,7 +2061,7 @@ static void import_texture(int tile) {
                 ok_h = x360_hdram[ok_slot].h;
             } else {
                 uint32_t pw = 0, ph = 0;
-                if (x360_pak_read(ok_full_hash, &pw, &ph)) {
+                if (x360_pak_read(ok_full_hash, &pw, &ph) && x360_pak_last_fmt == 0) {
                     x360_hdram_store(ok_full_hash, pw, ph, x360_hd_buf, pw * ph * 4);
                     ok_slot = x360_hdram_find(ok_full_hash);
                     if (ok_slot >= 0) {
@@ -3878,6 +3902,145 @@ static inline void *seg_addr(uintptr_t w1) {
     return x360_resolve_address(w1,rspSegments);
 }
 
+/* ---- Telao do Luigi Raceway / Wario Stadium ----------------------------------
+   Como no N64: os blocos do telao sao texturas da pista, recarregadas da ROM a
+   cada corrida; com 1 jogador o jogo grava pedacos da tela neles ao se aproximar
+   do telao, com 2+ jogadores grava todos uma vez na largada (imagem parada).
+   Aqui cada bloco gravado e guardado numa memoria da pista, ZERADA a cada corrida
+   nova (textura original), e o desenho do telao le dela.
+   O desenho le as texturas da pista de uma COPIA ESTATICA (espelho do segmento 5
+   em outro endereco); a base dela e descoberta comparando texturas carregadas
+   pelo desenho com a copia em RAM do segmento 5. 0 desliga. */
+#define X360_TELAO_DESVIO 1
+#define X360_TELAO_PISTAS 4
+#define X360_TELAO_BLOCOS 8
+struct X360TelaoPista {
+    int curso;                         /* gCurrentCourseId; -1 = livre */
+    uintptr_t s5;                      /* base da copia estatica (0 = desconhecida) */
+    int n;                             /* blocos guardados */
+    uintptr_t off[X360_TELAO_BLOCOS];  /* deslocamento de cada bloco no segmento 5 */
+    uint8_t dados[X360_TELAO_BLOCOS][4096];
+};
+static struct X360TelaoPista x360_telao_pistas[X360_TELAO_PISTAS];
+static struct X360TelaoPista *x360_telao_atual;    /* pista em curso (com telao) */
+static int x360_telao_iniciado;
+static uintptr_t x360_telao_ram5;                  /* base RAM do segmento 5 (1 jogador) */
+static uintptr_t x360_telao_s5_cand;
+static unsigned x360_telao_s5_tentativas;
+static uintptr_t x360_telao_s5_tentados[16];
+static unsigned x360_telao_quadro, x360_telao_quadro_pista;   /* contador de quadros do gfx */
+
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_pista(int um_jogador, int curso) {
+    int k, livre = -1;
+    struct X360TelaoPista *t = 0;
+    if (!x360_telao_iniciado) {
+        for (k = 0; k < X360_TELAO_PISTAS; k++) x360_telao_pistas[k].curso = -1;
+        x360_telao_iniciado = 1;
+    }
+    if (x360_telao_quadro - x360_telao_quadro_pista > 60) {   /* corrida nova */
+        x360_telao_ram5 = 0;
+        x360_telao_s5_cand = 0;
+        x360_telao_s5_tentativas = 0;
+    }
+    for (k = 0; k < X360_TELAO_PISTAS; k++) {
+        if (x360_telao_pistas[k].curso == curso) { t = &x360_telao_pistas[k]; break; }
+        if (x360_telao_pistas[k].curso < 0 && livre < 0) livre = k;
+    }
+    if (!t && livre >= 0) {
+        t = &x360_telao_pistas[livre];
+        t->curso = curso; t->s5 = 0; t->n = 0;
+    }
+    /* corrida nova: o telao volta a textura original (recarregada da ROM) */
+    if (t && x360_telao_quadro - x360_telao_quadro_pista > 60)
+        t->n = 0;
+    (void)um_jogador;
+    x360_telao_atual = t;
+    x360_telao_quadro_pista = x360_telao_quadro;
+}
+/* chamado antes de o jogo gravar um bloco (so com 1 jogador) */
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_set_ram_seg5(uintptr_t base, uintptr_t bloco) {
+    (void)bloco;
+    x360_telao_ram5 = base;
+}
+/* chamado depois de o jogo gravar um bloco: guarda na memoria da pista */
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_gravado(uintptr_t base, uintptr_t bloco, const void *dados, int bytes) {
+    struct X360TelaoPista *t = x360_telao_atual;
+    int k;
+    if (!t || bloco < base || bloco - base >= 0x80000u || bytes <= 0 || bytes > 4096) return;
+    const uintptr_t o = bloco - base;
+    for (k = 0; k < t->n; k++) if (t->off[k] == o) break;
+    if (k == t->n) {
+        if (t->n >= X360_TELAO_BLOCOS) return;
+        t->off[t->n++] = o;
+    }
+    memcpy(t->dados[k], dados, (size_t)bytes);
+}
+static int x360_telao_e_bloco(const struct X360TelaoPista *t, uintptr_t o) {
+    int k;
+    for (k = 0; k < t->n; k++) if (o >= t->off[k] && o < t->off[k] + 0x1000u) return 1;
+    return 0;
+}
+static uintptr_t x360_telao_procura_base(const struct X360TelaoPista *t, uintptr_t a) {
+    const uint8_t *pa = (const uint8_t *)a;
+    unsigned k, varia = 0;
+    for (k = 2; k < 1024; k += 2)          /* texturas lisas nao identificam posicao */
+        if (pa[k] != pa[0] || pa[k + 1] != pa[1]) { varia = 1; break; }
+    if (!varia) return 0;
+    for (uintptr_t o = 0; o < 0x80000u; o += 0x800u) {
+        if (x360_telao_e_bloco(t, o)) continue;          /* blocos do telao (sobrescritos) */
+        const uint8_t *pr = (const uint8_t *)(x360_telao_ram5 + o);
+        if (pr[0] == pa[0] && pr[1] == pa[1] && memcmp(pr, pa, 1024) == 0)
+            return a - o;
+    }
+    return 0;
+}
+static void *x360_telao_desvia(uintptr_t w1, void *resolvido) {
+#if X360_TELAO_DESVIO
+    struct X360TelaoPista *t = x360_telao_atual;
+    int k;
+    if (!t || !t->n || x360_telao_quadro - x360_telao_quadro_pista > 60)
+        return resolvido;
+    uintptr_t off;
+    if (w1 < 0x10000000u && ((w1 >> 24) & 0x0F) == 5) {
+        off = w1 & 0x00FFFFFFu;
+    } else {
+        const uintptr_t a = (uintptr_t)resolvido;
+        if (!t->s5) {
+            /* aprende a base da copia estatica (so com 1 jogador, com a RAM da pista) */
+            unsigned q;
+            if (!x360_telao_ram5 || x360_telao_s5_tentativas >= 16 || a < 0x80000000u)
+                return resolvido;
+            for (q = 0; q < x360_telao_s5_tentativas; q++)
+                if (x360_telao_s5_tentados[q] == a) return resolvido;
+            x360_telao_s5_tentados[x360_telao_s5_tentativas++] = a;
+            const uintptr_t base = x360_telao_procura_base(t, a);
+            if (!base) return resolvido;
+            if (x360_telao_s5_cand == base) t->s5 = base;
+            else x360_telao_s5_cand = base;
+            return resolvido;
+        }
+        if (a < t->s5) return resolvido;
+        off = a - t->s5;
+    }
+    for (k = 0; k < t->n; k++)
+        if (off >= t->off[k] && off < t->off[k] + 0x1000u)
+            return (void *)(t->dados[k] + (off - t->off[k]));
+    return resolvido;
+#else
+    (void)w1;
+    return resolvido;
+#endif
+}
+
 /*
  * B8 race-transition diagnostic.
  *
@@ -4525,7 +4688,8 @@ static void gfx_run_dl(Gfx* cmd) {
 
             // RDP Commands:
             case G_SETTIMG:
-                gfx_dp_set_texture_image(C0(21, 3), C0(19, 2), C0(0, 12), seg_addr(cmd->words.w1));
+                gfx_dp_set_texture_image(C0(21, 3), C0(19, 2), C0(0, 12),
+                                         x360_telao_desvia(cmd->words.w1, seg_addr(cmd->words.w1)));
                 break;
             case G_LOADBLOCK:
                 gfx_dp_load_block(C1(24, 3), C0(12, 12), C0(0, 12), C1(12, 12), C1(0, 12));
@@ -4801,6 +4965,7 @@ void gfx_run(Gfx *commands) {
 }
 
 void gfx_end_frame(void) {
+    ++x360_telao_quadro;
 #if X360_HDTEX_STATS
     {
         LARGE_INTEGER agora;

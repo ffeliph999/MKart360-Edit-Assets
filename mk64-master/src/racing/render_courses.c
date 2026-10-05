@@ -11,6 +11,15 @@
 #include "actors.h"
 #include "math_util.h"
 #include "memory.h"
+#ifdef XBOX360_PORT
+/* MKart360-Edit-Assets: avisa o gfx_pc.c que esta pista tem telao e se o jogo o
+   atualiza neste quadro (so com 1 jogador, como no N64). Com 2+ jogadores ou fora
+   destas pistas, o telao mostra a textura original. */
+#ifdef __cplusplus
+extern "C"
+#endif
+void x360_telao_pista(int um_jogador, int curso);
+#endif
 #include "code_80281780.h"
 #include "collision.h"
 #include "skybox_and_splitscreen.h"
@@ -912,6 +921,9 @@ void render_luigi_raceway(struct UnkStruct_800DC5EC* arg0) {
 
     D_800DC5DC = 88;
     D_800DC5E0 = 72;
+#ifdef XBOX360_PORT
+    x360_telao_pista(gActiveScreenMode == SCREEN_MODE_1P, gCurrentCourseId);
+#endif
 
     // Render only the first player camera onto the television billboard. Screen agnostic screens of other players).
     if ((gActiveScreenMode == SCREEN_MODE_1P) && (sp22 >= 10) && (sp22 < 17)
@@ -1149,6 +1161,9 @@ void render_wario_stadium(struct UnkStruct_800DC5EC* arg0) {
 
     D_800DC5DC = 88;
     D_800DC5E0 = 72;
+#ifdef XBOX360_PORT
+    x360_telao_pista(gActiveScreenMode == SCREEN_MODE_1P, gCurrentCourseId);
+#endif
     if (gActiveScreenMode == SCREEN_MODE_1P
 #ifdef XBOX360_PORT
         && r70_x360_jumbotron_refresh()

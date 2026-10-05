@@ -30,10 +30,11 @@ sem modificar a ROM nem os assets compilados do jogo, e funciona com
   - o gancho HD não sobrescreve mais o hash de conteúdo do cache de
     texturas — isso corrigiu as piscadas nas texturas de menu carregadas em
     blocos;
-  - **compressão DXT1/DXT5 opcional** dentro do `tex.pak` (veja
-    [tex.pak comprimido](#texpak-comprimido-dxt-opcional)), descomprimida no
-    console antes de a textura ser enviada à GPU. Arquivos `tex.pak` antigos,
-    sem compressão, continuam sendo lidos normalmente.
+  - **compressão DXT1/DXT5** dentro do `tex.pak` (veja
+    [tex.pak comprimido](#texpak-comprimido-dxt)): as texturas vão
+    **comprimidas direto para a GPU**, que lê DXT nativamente — 4 a 8 vezes
+    menos memória de vídeo, sem nenhuma descompressão na CPU. Arquivos
+    `tex.pak` sem compressão continuam sendo lidos normalmente.
   - `x360_try_draw_hd_menu_quad` já existe no código, mas está **inativa**
     (ainda não é chamada) — reservada para uma substituição futura das
     texturas grandes de menu.
@@ -51,9 +52,10 @@ sem modificar a ROM nem os assets compilados do jogo, e funciona com
 - Foi descoberto que ao executar o jogo com um tex.pak em discos rígidos mecânicos,
   sejam internos ou externos, pode causar pequenos travamentos durante o jogo, 
   o desempenho pode variar, recomenda-se o uso de pen drives ou SSDs.
-- A compressão DXT tem perda: ela reduz muito o tamanho do `tex.pak`, mas pode deixar
-  granulação/faixas visíveis e pequenas alterações de cor (veja
-  [tex.pak comprimido](#texpak-comprimido-dxt-opcional)).
+- A compressão DXT tem perda. Em texturas de resolução maior (a partir de
+  ~128×128, ou 2× a original ou mais) a diferença é praticamente invisível; em
+  texturas pequenas pode aparecer um pouco de granulação ou pequenas
+  alterações de cor (veja [tex.pak comprimido](#texpak-comprimido-dxt)).
 
 ---
 
@@ -131,7 +133,8 @@ mas para funcionarem, precisam ser movidos para `mk64-master/`, com exceção de
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extrai as texturas da ROM em PNGs editáveis |
 | `PACK_TEXTURES.py` | Empacota os PNGs editados no formato que o jogo lê (`tex.pak`) |
-| `HALVE_PNGS.py` | Reduz a resolução de PNGs HD pela metade, para caber na memória do console, use se tiver problemas de desempenho |
+| `HALVE_PNGS.py` | Reduz a resolução de PNGs HD (metade, fator, porcentagem, lado máximo ou tamanho exato) para caber na memória do console; use se tiver problemas de desempenho |
+| `DXT_PREVIEW.py` | Mostra no PC, lado a lado com o original, como cada textura vai ficar com `--dxt` (usa o mesmo decodificador do console) |
 | `SCAN_HALVES.py` | Ferramenta de diagnóstico: descobre onde ficam as "metades de baixo" dos sprites de kart quando o hash não bate |
 | `CROSS_CHECK.py` | Cruza o log de trace do jogo com os manifests para achar texturas não encontradas |
 | `SCAN_MENU.py` | Mede, a partir de um log de trace, como o jogo divide as imagens grandes de menu em blocos |
@@ -187,7 +190,9 @@ Gera `tex\tex.pak`, um único arquivo com tudo dentro.
 | `--only PREFIXO` | Limita a um subconjunto, ex.: `--only karts\bowser` |
 | `--out PASTA` | Pasta de saída (padrão `tex`) |
 | `--max N` | Ignora imagens maiores que N pixels (padrão 2048) |
-| `--dxt` | Com `--pak`: grava as texturas comprimidas em DXT1/DXT5 (veja abaixo) |
+| `--dxt` | Com `--pak`: grava as texturas comprimidas em DXT1/DXT5 (**recomendado**, veja abaixo) |
+| `--dxt-compacto` | Com `--dxt`: sprites com transparência "liga/desliga" em DXT1 (metade do tamanho, um pouco menos de qualidade) |
+| `--dxt-sem-ajuste` | Com `--dxt`: não reamostra os recortes fora de múltiplos de 4 (eles ficam sem compressão) |
 
 Sem `--pak`, são gerados milhares de arquivos `.tex` avulsos — funciona, mas
 carrega mais devagar e é mais frágil de transferir; use só para depuração.
@@ -207,54 +212,87 @@ tex.pak          <- aqui, NÃO dentro de uma pasta tex\
 Trocar texturas não exige recompilar o executavel .xex — o `tex.pak` é lido em tempo de
 execução. Só é preciso recompilar quando o código C muda.
 
-### tex.pak comprimido (DXT, opcional e experimental)
+### tex.pak comprimido (DXT)
 
 ```powershell
 pip install numpy
 py .\PACK_TEXTURES.py --pak --dxt
 ```
 
-Cada textura é gravada como **DXT1** (opaca ou com transparência
-"liga/desliga", ~8× menor que RGBA) ou **DXT5** (transparência gradual, ~4×
-menor). O console lê menos do disco e cabem mais texturas no cache em RAM;
-os dados são descomprimidos pela CPU antes do envio à GPU.
+Cada textura é gravada como **DXT1** (opacas, ~8× menor que RGBA) ou **DXT5**
+(com transparência, ~4× menor) e vai **comprimida até a GPU**: o Xbox 360 lê
+DXT nativamente, sem descompressão na CPU. Com isso:
 
-Limitações:
+- **a memória de vídeo cai de 4 a 8 vezes** — no pacote completo de texturas
+  HD, de ~808 MB para ~196 MB;
+- o `tex.pak` fica muito menor, o console lê menos do disco e cabem mais
+  texturas no cache em RAM;
+- dá para usar **resoluções maiores no mesmo espaço**: um sprite 256×256 em
+  DXT5 ocupa o mesmo que um 128×128 sem compressão.
 
-- **Tem perda.** Degradês podem apresentar granulação ou faixas, e os sprites
-  podem ter pequenas alterações de cor (por exemplo, bordas mais claras).
-  Compare com e sem `--dxt` e fique com o que parecer melhor para você.
-- **Não elimina as travadinhas de carregamento.** Os testes mostraram que as
-  travadas da primeira vez nos menus e nas pistas com muitas texturas vêm da
-  *quantidade* de leituras do disco, e não do tamanho delas — o DXT deixa
-  cada leitura menor, mas não reduz o número de leituras.
-- **A memória de vídeo não muda:** as texturas continuam chegando à GPU em
-  RGBA, então o uso de memória de vídeo é o mesmo que sem compressão.
-- Texturas cuja largura ou altura não seja múltipla de 4, e a textura do
-  botão "OK" do menu, são sempre gravadas sem compressão.
-- Um `tex.pak` comprimido **exige o `gfx_pc.c` atualizado**; versões antigas
-  não conseguem lê-lo. A versão atualizada lê tanto paks comprimidos quanto
-  sem compressão.
+**Suporte amplo:** praticamente todas as texturas são comprimidas. O DXT exige
+largura e altura múltiplas de 4; os recortes que o jogo usa fora desse padrão
+(faixas dos fundos e títulos dos menus, fontes, recortes com linha de
+sobreposição) são **reamostrados automaticamente** para o múltiplo de 4
+imediatamente acima. O jogo estica cada textura HD para cobrir a área da
+original, então nada muda de lugar. Só o botão "OK" do menu fica sempre sem
+compressão. Ao terminar, o empacotador mostra quantas texturas foram
+comprimidas e grava em `tex\dxt_sem_compressao.txt` a lista das que não
+foram, se houver.
+
+**Qualidade:** o codificador escolhe as cores de cada bloco 4×4 pelo eixo
+principal de cor e as refina por mínimos quadrados (qualidade próxima à de
+codificadores profissionais). Sprites e texturas com transparência usam DXT5,
+que preserva melhor as cores. Ainda assim, o DXT tem perda, e o resultado
+depende da resolução:
+
+- **texturas grandes** (a partir de ~128×128, ou 2× a original ou mais): a
+  diferença é praticamente invisível;
+- **texturas pequenas** (perto da resolução original do N64): pode aparecer um
+  pouco de granulação ou pequenas alterações de cor, porque cada bloco 4×4
+  cobre uma parte maior do desenho.
+
+Para conferir antes de ir ao console, o `DXT_PREVIEW.py` gera imagens lado a
+lado (original | DXT) usando o mesmo decodificador do console:
+
+```powershell
+py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 30 --zoom 2
+```
+
+Outras observações:
+
+- **Não elimina as travadinhas de carregamento.** As travadas da primeira vez
+  nos menus vêm da *quantidade* de leituras do disco, e não do tamanho delas.
+- Um `tex.pak` comprimido **exige o `gfx_pc.c` e o `xbox360_renderer.cpp`
+  atualizados**; versões antigas não conseguem lê-lo. A versão atualizada lê
+  tanto paks comprimidos quanto sem compressão.
 
 ### Limites de memória
 
 O Xbox 360 tem 512 MB compartilhados entre sistema e vídeo. O elenco completo
-de personagens/karts soma 2568 sprites (2 arquivos cada):
+de personagens/karts soma 2568 sprites (2 metades cada):
 
-| Resolução | Total estimado | Observação |
-|---|---|---|
-| 256×256 | ~640 MB | não cabe |
-| 128×128 | ~160 MB | recomendado |
-| 96×96 | ~90 MB | mais folga |
+| Resolução | Sem compressão | Com `--dxt` (DXT5) | Observação |
+|---|---|---|---|
+| 256×256 | ~640 MB | ~160 MB | cabe com `--dxt` |
+| 128×128 | ~160 MB | ~40 MB | |
+| 96×96 | ~90 MB | ~23 MB | |
 
-Para reduzir PNGs já editados:
+Com `--dxt`, os karts em 256×256 ocupam o mesmo que em 128×128 sem compressão,
+com o dobro da resolução.
+
+Para reduzir PNGs já editados (sem opção de tamanho, reduz pela metade):
 
 ```powershell
-py .\HALVE_PNGS.py --recursive              # prévia, não altera nada
-py .\HALVE_PNGS.py --apply --recursive      # aplica de fato
+py .\HALVE_PNGS.py --recursive                     # prévia, não altera nada
+py .\HALVE_PNGS.py --apply --recursive             # aplica de fato (metade)
+py .\HALVE_PNGS.py --max 256 --recursive --apply   # limita o lado maior a 256 px
 ```
 
-Use `--backup` para manter os originais como `*.orig.png`.
+Outras formas de escolher o tamanho: `--fator N` (divide por N), `--escala P`
+(porcentagem) e `--tamanho LxA` (tamanho exato). As dimensões ficam sempre em
+múltiplos de 4, para o DXT. Use `--backup` para manter os originais como
+`*.orig.png` e `--restaurar` para devolvê-los.
 
 ### Diagnóstico (quando uma textura não aparece em HD)
 

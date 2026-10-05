@@ -2,8 +2,10 @@ extern "C" void x360_log(const char*);
 #include <xtl.h>
 #include <d3d9.h>
 #include <d3dx9.h>
+#include <xgraphics.h>
 #include <vector>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 extern "C" {
@@ -103,7 +105,7 @@ static uint32_t new_tex(void){textures.push_back(0);return (uint32_t)textures.si
 #define X360_TEX_RECYCLE_DELAY 3                     /* quadros */
 #define X360_TEX_RECYCLE_MAX   512                   /* texturas na reserva */
 #define X360_TEX_RECYCLE_BYTES (24u * 1024u * 1024u) /* memoria da reserva */
-struct X360RecycledTex { IDirect3DTexture9 *t; int w, h; unsigned bytes, frame; };
+struct X360RecycledTex { IDirect3DTexture9 *t; int w, h; D3DFORMAT fmt; unsigned bytes, frame; };
 static X360RecycledTex recycle_bin[X360_TEX_RECYCLE_MAX];
 static int recycle_n;
 static unsigned recycle_bytes, frame_no;
@@ -119,9 +121,9 @@ static int recycle_oldest(void) {
         if (v < 0 || recycle_bin[i].frame < recycle_bin[v].frame) v = i;
     return v;
 }
-static IDirect3DTexture9 *recycle_take(int w, int h) {
+static IDirect3DTexture9 *recycle_take(int w, int h, D3DFORMAT fmt) {
     for (int i = 0; i < recycle_n; i++) {
-        if (recycle_bin[i].w == w && recycle_bin[i].h == h &&
+        if (recycle_bin[i].w == w && recycle_bin[i].h == h && recycle_bin[i].fmt == fmt &&
             frame_no - recycle_bin[i].frame >= X360_TEX_RECYCLE_DELAY) {
             IDirect3DTexture9 *t = recycle_bin[i].t;
             recycle_bytes -= recycle_bin[i].bytes;
@@ -134,12 +136,15 @@ static IDirect3DTexture9 *recycle_take(int w, int h) {
 static void recycle_put(IDirect3DTexture9 *t) {
     D3DSURFACE_DESC desc;
     if (FAILED(t->GetLevelDesc(0, &desc))) { t->Release(); return; }
-    const unsigned bytes = desc.Width * desc.Height * 4;
+    /* DXT1: meio byte por pixel; DXT5: 1 byte; RGBA: 4 bytes */
+    const unsigned bytes = desc.Format == D3DFMT_LIN_DXT1 ? desc.Width * desc.Height / 2 :
+                           desc.Format == D3DFMT_LIN_DXT5 ? desc.Width * desc.Height :
+                                                            desc.Width * desc.Height * 4;
     if (bytes > X360_TEX_RECYCLE_BYTES) { t->Release(); return; }
     while (recycle_n > 0 && (recycle_n >= X360_TEX_RECYCLE_MAX ||
                              recycle_bytes + bytes > X360_TEX_RECYCLE_BYTES))
         recycle_drop(recycle_oldest());
-    X360RecycledTex r = { t, (int)desc.Width, (int)desc.Height, bytes, frame_no };
+    X360RecycledTex r = { t, (int)desc.Width, (int)desc.Height, desc.Format, bytes, frame_no };
     recycle_bin[recycle_n++] = r;
     recycle_bytes += bytes;
 }
@@ -151,7 +156,7 @@ static void select_tex(int tile,uint32_t id) {
 static void upload_tex(const uint8_t*rgba,int w,int h) {
     IDirect3DDevice9*d=x360_d3d_device();uint32_t id=selected[upload_tile];
     if(!d||!rgba||w<=0||h<=0||w>4096||h>4096||!id||id>textures.size())return;
-    IDirect3DTexture9*t=recycle_take(w,h);
+    IDirect3DTexture9*t=recycle_take(w,h,D3DFMT_LIN_A8R8G8B8);
     HRESULT hr=t?S_OK:d->CreateTexture(w,h,1,0,D3DFMT_LIN_A8R8G8B8,D3DPOOL_DEFAULT,&t,0);
     D3DLOCKED_RECT lock;
     if(SUCCEEDED(hr))hr=t->LockRect(0,&lock,0,0);
@@ -159,6 +164,39 @@ static void upload_tex(const uint8_t*rgba,int w,int h) {
     for(int y=0;y<h;y++) {
         DWORD *row=(DWORD*)((BYTE*)lock.pBits+y*lock.Pitch);
         for(int x=0;x<w;x++){const uint8_t*c=rgba+(y*w+x)*4;row[x]=((DWORD)c[3]<<24)|((DWORD)c[0]<<16)|((DWORD)c[1]<<8)|c[2];}
+    }
+    t->UnlockRect(0);
+    IDirect3DTexture9*old=textures[id-1];textures[id-1]=t;
+    for(int i=0;i<2;i++)if(selected[i]==id)d->SetTexture(i,t);
+    if(old)recycle_put(old);
+}
+
+/* Texturas HD em DXT (tex.pak gerado com --dxt): enviadas COMPRIMIDAS. A GPU do
+   Xbox 360 le DXT1/DXT5 nativamente -- 4 a 8x menos memoria de video que RGBA e
+   nenhuma descompressao na CPU.
+   O formato DXT do Xbox 360 usa ordem de bytes trocada de 16 em 16 bits em
+   relacao ao DXT do PC (o mesmo que XGEndianSwapMemory com XGENDIAN_8IN16 faz
+   ao converter texturas de PC). Se as cores sairem embaralhadas no console,
+   troque X360_DXT_SWAP16 para 0. */
+#define X360_DXT_SWAP16 1
+extern "C" void x360_upload_texture_dxt(const uint8_t*data,int w,int h,int fmt) {
+    IDirect3DDevice9*d=x360_d3d_device();uint32_t id=selected[upload_tile];
+    if(!d||!data||w<=0||h<=0||(w&3)||(h&3)||w>4096||h>4096||!id||id>textures.size())return;
+    if(fmt!=1&&fmt!=2)return;
+    const D3DFORMAT df=fmt==1?D3DFMT_LIN_DXT1:D3DFMT_LIN_DXT5;
+    IDirect3DTexture9*t=recycle_take(w,h,df);
+    HRESULT hr=t?S_OK:d->CreateTexture(w,h,1,0,df,D3DPOOL_DEFAULT,&t,0);
+    D3DLOCKED_RECT lock;
+    if(SUCCEEDED(hr))hr=t->LockRect(0,&lock,0,0);
+    if(FAILED(hr)){if(t)t->Release();x360_log("MK64: DXT texture allocation/lock failed\n");return;}
+    const int rowbytes=(w/4)*(fmt==1?8:16);   /* uma linha de blocos 4x4 */
+    for(int by=0;by<h/4;by++){
+        BYTE*dst=(BYTE*)lock.pBits+by*lock.Pitch;const uint8_t*src=data+by*rowbytes;
+#if X360_DXT_SWAP16
+        for(int i=0;i<rowbytes;i+=2){dst[i]=src[i+1];dst[i+1]=src[i];}
+#else
+        memcpy(dst,src,rowbytes);
+#endif
     }
     t->UnlockRect(0);
     IDirect3DTexture9*old=textures[id-1];textures[id-1]=t;
@@ -430,6 +468,167 @@ static void start_frame(void){
     }
 }
 extern "C" void x360_net8_draw_hud(void);
-static void end_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){x360_net8_draw_hud();d->EndScene();}++frame_no;}
+
+/* ---- Telao do Luigi Raceway e do Wario Stadium ------------------------------
+   No N64 o jogo copia pedacos da imagem da tela para a textura do telao: com 1
+   jogador, um pedaco 64x32 por quadro ao se aproximar do telao; com 2+ jogadores,
+   os 6 pedacos de uma vez, na largada (vista do jogador 1, que fica parada).
+   Aqui a imagem fica na memoria da GPU: enquanto o telao estiver em uso, a tela e
+   capturada (Resolve) a cada X360_TELAO_INTERVALO quadros em duas texturas
+   alternadas, e cada pedaco e lido de uma captura com pelo menos 2 quadros de
+   idade -- a CPU nunca espera a GPU. Se ainda nao houver captura pronta, o pedido
+   fica guardado e e atendido assim que houver. 0 desliga (telao branco). */
+#define X360_TELAO 1
+#define X360_TELAO_INTERVALO 3
+/* Enquadramento (pixels do N64; escala em torno do centro da area pedida),
+   ajustado no console. Um game:\telao.cfg opcional substitui estes valores:
+   "x=0 y=16 escala=1.2" (1 jogador) e "x2=0 y2=0 escala2=1.0" (2+ jogadores),
+   relido sempre que o telao volta a ser usado. */
+#define X360_TELAO_AJ_X 0.0f
+#define X360_TELAO_AJ_Y 16.0f
+#define X360_TELAO_AJ_ESCALA 1.2f
+#define X360_TELAO_AJ2_X 0.0f
+#define X360_TELAO_AJ2_Y 0.0f
+#define X360_TELAO_AJ2_ESCALA 1.0f
+#if X360_TELAO
+extern "C" void x360_telao_gravado(uintptr_t base,uintptr_t bloco,const void*dados,int bytes); /* gfx_pc.c */
+static IDirect3DTexture9*telao_tex[2];
+static unsigned telao_frame[2];
+static int telao_ok[2],telao_proxima,telao_pediu;
+static unsigned telao_pedido;
+static int telao_modo;                 /* gActiveScreenMode do pedido atual */
+static uintptr_t telao_base;           /* base RAM do segmento 5 do pedido atual */
+static float telao_aj[2][3]={{X360_TELAO_AJ_X,X360_TELAO_AJ_Y,X360_TELAO_AJ_ESCALA},
+                             {X360_TELAO_AJ2_X,X360_TELAO_AJ2_Y,X360_TELAO_AJ2_ESCALA}};
+struct TelaoPendente{int x,y,w,h,modo;uint16_t*alvo;uintptr_t base;unsigned quadro;};
+static TelaoPendente telao_pend[8];
+static int telao_n_pend;
+extern "C" void x360_telao_contexto(int modo,uintptr_t base){telao_modo=modo;telao_base=base;}
+static void telao_le_cfg(void){
+    float v[2][3]={{X360_TELAO_AJ_X,X360_TELAO_AJ_Y,X360_TELAO_AJ_ESCALA},
+                   {X360_TELAO_AJ2_X,X360_TELAO_AJ2_Y,X360_TELAO_AJ2_ESCALA}};
+    HANDLE f=CreateFileA("game:\\telao.cfg",GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(f!=INVALID_HANDLE_VALUE){
+        char b[256];DWORD n=0;
+        if(ReadFile(f,b,sizeof(b)-1,&n,NULL)){
+            b[n]=0;
+            for(char*p=b;*p;p++){
+                if(p!=b&&p[-1]!=' '&&p[-1]!='\n'&&p[-1]!='\t'&&p[-1]!='\r')continue;
+                if(!strncmp(p,"x2=",3))v[1][0]=(float)atof(p+3);
+                else if(!strncmp(p,"y2=",3))v[1][1]=(float)atof(p+3);
+                else if(!strncmp(p,"escala2=",8))v[1][2]=(float)atof(p+8);
+                else if(!strncmp(p,"x=",2))v[0][0]=(float)atof(p+2);
+                else if(!strncmp(p,"y=",2))v[0][1]=(float)atof(p+2);
+                else if(!strncmp(p,"escala=",7))v[0][2]=(float)atof(p+7);
+            }
+        }
+        CloseHandle(f);
+    }
+    for(int k=0;k<2;k++){
+        if(v[k][2]<0.25f||v[k][2]>4.0f)v[k][2]=k?X360_TELAO_AJ2_ESCALA:X360_TELAO_AJ_ESCALA;
+        telao_aj[k][0]=v[k][0];telao_aj[k][1]=v[k][1];telao_aj[k][2]=v[k][2];
+    }
+}
+static void telao_captura(IDirect3DDevice9*d){
+    if(!telao_pediu||frame_no-telao_pedido>30||(frame_no%X360_TELAO_INTERVALO)!=0)return;
+    const int i=telao_proxima;
+    if(!telao_tex[i]){
+        /* formato nativo (tiled): e o que o Resolve grava; a leitura converte
+           cada coordenada com XGAddress2DTiledOffset */
+        if(FAILED(d->CreateTexture((UINT)x360_video_width(),(UINT)x360_video_height(),1,0,
+                                   D3DFMT_A8R8G8B8,D3DPOOL_DEFAULT,&telao_tex[i],0))){
+            telao_tex[i]=0;return;
+        }
+    }
+    if(SUCCEEDED(d->Resolve(D3DRESOLVE_RENDERTARGET0,NULL,telao_tex[i],NULL,0,0,NULL,0.0f,0,NULL))){
+        telao_frame[i]=frame_no;telao_ok[i]=1;telao_proxima^=1;
+    }
+}
+/* Captura usavel: com pelo menos 2 quadros (a GPU ja terminou) e no maximo
+   X360_TELAO_IDADE_MAX quadros -- capturas antigas podem mostrar outra tela
+   (ex.: o menu, depois de sair de uma corrida). */
+#define X360_TELAO_IDADE_MAX 12
+static int telao_captura_pronta(void){
+    int b=-1;
+    for(int i=0;i<2;i++){
+        const unsigned idade=frame_no-telao_frame[i];
+        if(telao_ok[i]&&idade>=2&&idade<=X360_TELAO_IDADE_MAX&&(b<0||telao_frame[i]>telao_frame[b]))b=i;
+    }
+    return b;
+}
+/* Le o pedaco (x,y,w,h) da tela do N64 de uma captura ja travada. */
+static void telao_preenche(const D3DLOCKED_RECT&lk,int x,int y,int w,int h,int modo,uint16_t*alvo){
+    const int sw=(int)x360_video_width(),sh=(int)x360_video_height();
+    const DWORD*base=(const DWORD*)lk.pBits;
+    const int m=modo?1:0;
+    const float ajx=telao_aj[m][0],ajy=telao_aj[m][1],esc=telao_aj[m][2];
+    const float cxp=(float)x+(float)w*0.5f,cyp=(float)y+(float)h*0.5f;   /* centro do pedaco */
+    /* 1 jogador: centro da area completa do telao (152,120) */
+    const float cx0=m?cxp:152.0f,cy0=m?cyp:120.0f;
+    for(int ty=0;ty<h;ty++){
+        const float ny=cy0+((float)(y+ty)+0.5f-cy0)*esc+ajy;
+        int py=(int)(ny*3.0f*(float)sh/720.0f);if(py<0)py=0;if(py>=sh)py=sh-1;
+        for(int tx=0;tx<w;tx++){
+            const float nx=cx0+((float)(x+tx)+0.5f-cx0)*esc+ajx;
+            /* N64 320x240 -> tela logica 1280x720, 3 pixels por pixel do N64, com a
+               imagem 4:3 de cada vista centralizada na vista. Telas divididas lado a
+               lado (2P vertical, 3P/4P): cada metade tem o proprio centro. */
+            const float c=(modo==2||modo==3)?(nx<160.0f?80.0f:240.0f):160.0f;
+            int px=(int)((c*4.0f+(nx-c)*3.0f)*(float)sw/1280.0f);if(px<0)px=0;if(px>=sw)px=sw-1;
+            const DWORD cor=base[XGAddress2DTiledOffset((UINT)px,(UINT)py,(UINT)sw,4)];
+            const unsigned r=(cor>>16)&255,g=(cor>>8)&255,bl=cor&255;
+            alvo[ty*w+tx]=(uint16_t)(((r>>3)<<11)|((g>>3)<<6)|((bl>>3)<<1)|1);
+        }
+    }
+}
+/* Atende pedidos guardados quando uma captura fica pronta (chamado no fim do quadro). */
+static void telao_atende_pendentes(void){
+    if(!telao_n_pend)return;
+    /* pedidos antigos (ex.: o jogador saiu da corrida) sao descartados */
+    int v=0;
+    for(int k=0;k<telao_n_pend;k++)if(frame_no-telao_pend[k].quadro<=30)telao_pend[v++]=telao_pend[k];
+    telao_n_pend=v;
+    if(!telao_n_pend)return;
+    const int b=telao_captura_pronta();
+    D3DLOCKED_RECT lk;
+    if(b<0||FAILED(telao_tex[b]->LockRect(0,&lk,0,D3DLOCK_READONLY)))return;
+    for(int k=0;k<telao_n_pend;k++){
+        TelaoPendente&p=telao_pend[k];
+        telao_preenche(lk,p.x,p.y,p.w,p.h,p.modo,p.alvo);
+        x360_telao_gravado(p.base,(uintptr_t)p.alvo,p.alvo,p.w*p.h*2);
+    }
+    telao_tex[b]->UnlockRect(0);
+    telao_n_pend=0;
+}
+extern "C" int x360_capture_n64_region(int x,int y,int w,int h,uint16_t*target){
+    if(!target||w<=0||h<=0||w>64||h>32)return 0;
+    if(!telao_pediu||frame_no-telao_pedido>30)telao_le_cfg();   /* telao voltou a ser usado */
+    telao_pedido=frame_no;telao_pediu=1;
+    const int b=telao_captura_pronta();
+    D3DLOCKED_RECT lk;
+    if(b<0||FAILED(telao_tex[b]->LockRect(0,&lk,0,D3DLOCK_READONLY))){
+        /* sem captura pronta: o pedaco fica como esta (textura original) e o
+           pedido e atendido assim que houver captura */
+        int k;
+        for(k=0;k<telao_n_pend;k++)if(telao_pend[k].alvo==target)break;
+        if(k==telao_n_pend&&telao_n_pend<8)++telao_n_pend;
+        if(k<8){
+            TelaoPendente&p=telao_pend[k];
+            p.x=x;p.y=y;p.w=w;p.h=h;p.modo=telao_modo;p.alvo=target;p.base=telao_base;p.quadro=frame_no;
+        }
+        return 1;
+    }
+    telao_preenche(lk,x,y,w,h,telao_modo,target);
+    telao_tex[b]->UnlockRect(0);
+    return 1;
+}
+#endif
+static void end_frame(void){IDirect3DDevice9*d=x360_d3d_device();if(d){x360_net8_draw_hud();d->EndScene();
+#if X360_TELAO
+    telao_captura(d);
+    if(telao_n_pend)telao_pedido=frame_no;   /* mantem a captura ativa ate atender */
+    telao_atende_pendentes();
+#endif
+    }++frame_no;}
 static void finish(void){}
 extern "C" struct GfxRenderingAPI gfx_xbox360_api={z01,unload_shader,load_shader,create_shader,lookup_shader,shader_info,new_tex,select_tex,upload_tex,sampler,depth_test,depth_mask,zmode,viewport,scissor,use_alpha,draw,init,resize,start_frame,end_frame,finish};
