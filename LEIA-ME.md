@@ -22,7 +22,13 @@ sem modificar a ROM nem os assets compilados do jogo, e funciona com
   - leitura do `tex.pak` por meio de uma tabela indexada por hash;
   - alternativa com arquivos `.tex` avulsos em subpastas (para contornar o
     limite de arquivos por pasta do FATX);
-  - cache em RAM das texturas HD (evita reler do disco);
+  - **carregamento total do `tex.pak` na memória, em segundo plano**: logo que
+    o jogo abre, uma thread separada lê o arquivo inteiro em leituras
+    sequenciais (1 a 2 segundos num HD interno, sem o jogo esperar). Depois
+    disso, nenhuma leitura de disco acontece durante o jogo. Só é usado se o
+    pak couber deixando 128 MB livres;
+  - cache em RAM das texturas HD, ajustado à memória livre do console (40 a
+    160 MB), usado quando o pak não cabe inteiro na memória;
   - cache de texturas ampliado (de 512 para 1024 entradas);
   - trace de diagnóstico desligado por padrão (`X360_HDTEX_TRACE 0`), com um
     modo de menu (`X360_HDTEX_TRACE_MENU`) que também registra a posição de
@@ -49,9 +55,12 @@ sem modificar a ROM nem os assets compilados do jogo, e funciona com
 - Texturas em resolução muito alta (acima de HQ) podem sobrecarregar o
   hardware do Xbox 360 e causar travamentos ou problemas de desempenho; o
   suporte a HD existe, mas é limitado ao hardware do console.
-- Foi descoberto que ao executar o jogo com um tex.pak em discos rígidos mecânicos,
-  sejam internos ou externos, pode causar pequenos travamentos durante o jogo, 
-  o desempenho pode variar, recomenda-se o uso de pen drives ou SSDs.
+- O `tex.pak` é carregado inteiro na memória ao abrir o jogo, então não há
+  leituras de disco durante as corridas, nem em HD interno mecânico. Isso exige
+  que o pak caiba deixando 128 MB livres (num console com ~400 MB livres, até
+  uns 270 MB). Se ele for maior, o jogo volta a ler do disco conforme precisa e,
+  em HD mecânico, podem voltar pequenas travadas; nesse caso, reduza o pak
+  (veja [Problemas comuns](#problemas-comuns)).
 - A compressão DXT tem perda. Em texturas de resolução maior (a partir de
   ~128×128, ou 2× a original ou mais) a diferença é praticamente invisível; em
   texturas pequenas pode aparecer um pouco de granulação ou pequenas
@@ -252,6 +261,28 @@ depende da resolução:
   pouco de granulação ou pequenas alterações de cor, porque cada bloco 4×4
   cobre uma parte maior do desenho.
 
+**Modo compacto (`--dxt-compacto`).** Afeta só as texturas com transparência
+"liga/desliga" (cada pixel totalmente visível ou totalmente transparente): os
+sprites dos karts e personagens, itens, árvores. Por padrão elas usam DXT5 (4
+cores por bloco 4×4 + transparência separada, 1 byte por pixel); no modo
+compacto usam DXT1 (3 cores + "transparente", meio byte por pixel).
+
+- **Prós:** sprites com **metade do tamanho** — como os karts são a maior parte
+  do pacote, o `tex.pak` encolhe bastante (por exemplo, de ~210 MB para
+  ~130 MB), sobra mais memória e o carregamento fica mais rápido.
+- **Contras:** um pouco menos de qualidade de cor nos sprites (cerca de 1,7 dB
+  a menos nas medições): pode aparecer um leve granulado ou bordas um pouco mais
+  claras, mais perceptíveis em sprites de baixa resolução.
+- Texturas opacas e com transparência gradual não mudam.
+
+Para decidir, compare as duas versões no PC:
+
+```powershell
+py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 20 --zoom 2 --out dxt_preview_padrao
+py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 20 --zoom 2 --compacto --out dxt_preview_compacto
+py .\PACK_TEXTURES.py --pak --dxt --dxt-compacto     # se gostar do resultado
+```
+
 Para conferir antes de ir ao console, o `DXT_PREVIEW.py` gera imagens lado a
 lado (original | DXT) usando o mesmo decodificador do console:
 
@@ -261,8 +292,8 @@ py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 30 --zoom 2
 
 Outras observações:
 
-- **Não elimina as travadinhas de carregamento.** As travadas da primeira vez
-  nos menus vêm da *quantidade* de leituras do disco, e não do tamanho delas.
+- **Ajuda o carregamento total:** quanto menor o `tex.pak`, mais folga para ele
+  caber inteiro na memória (veja a descrição do `gfx_pc.c`).
 - Um `tex.pak` comprimido **exige o `gfx_pc.c` e o `xbox360_renderer.cpp`
   atualizados**; versões antigas não conseguem lê-lo. A versão atualizada lê
   tanto paks comprimidos quanto sem compressão.
@@ -358,10 +389,12 @@ o trace para `0`.
 - **A transferência para o console falha no fim** → o sistema de arquivos
   do Xbox 360 (FATX) aceita no máximo 4096 arquivos por pasta. É exatamente
   isso que a opção `--pak` resolve, gerando um arquivo único.
-- **Travadinhas durante o jogo** → reduza a resolução (128×128) ou a
-  quantidade de personagens substituídos. Uma pequena travada quando um
-  adversário novo aparece na tela é esperada: os sprites dele são carregados
-  naquele momento.
+- **Travadinhas durante o jogo** → provavelmente o `tex.pak` não coube inteiro
+  na memória (precisa deixar 128 MB livres; num console com ~400 MB livres, até
+  uns 270 MB). Reduza o pak: use `--dxt`, `--dxt-compacto` (sprites com metade do
+  tamanho) ou diminua a resolução com o `HALVE_PNGS.py`. Logo depois de abrir o
+  jogo, o carregamento leva 1 a 2 segundos; entrar numa corrida antes disso pode
+  causar alguma travada.
 
 ### Como funciona por dentro
 

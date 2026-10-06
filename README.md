@@ -18,7 +18,13 @@ without modifying the ROM or the compiled game assets, and works with **all ROM 
   - reading `tex.pak` through a hash-indexed table;
   - fallback to standalone `.tex` files in subfolders (to work around the
     FATX per-folder file limit);
-  - RAM cache for HD textures (avoids re-reading from disk);
+  - **full in-memory loading of `tex.pak`, in the background**: as soon as
+    the game starts, a separate thread reads the whole file with sequential
+    reads (1 to 2 seconds on an internal HDD, without the game waiting).
+    After that, no disk reads happen during gameplay. Only used if the pack
+    fits while leaving 128 MB free;
+  - RAM cache for HD textures, sized from the console's free memory (40 to
+    160 MB), used when the pack doesn't fit entirely in memory;
   - enlarged texture cache (from 512 to 1024 entries);
   - diagnostic trace disabled by default (`X360_HDTEX_TRACE 0`), with a
     menu mode (`X360_HDTEX_TRACE_MENU`) that also logs each piece's position;
@@ -41,7 +47,12 @@ without modifying the ROM or the compiled game assets, and works with **all ROM 
 ### Known limitations
 
 - High-resolution textures (higher than HQ) can overload the Xbox 360 hardware and cause crashes or performance issues; HD support exists but is limited to the console's hardware.
-- Running tex.pak on internal or external mechanical hard disk drives may cause stuttering during gameplay; it is recommended to use USB flash drives (pen drives) or SSDs.
+- `tex.pak` is loaded entirely into memory when the game starts, so there are
+  no disk reads during races, even on an internal mechanical HDD. This requires
+  the pack to fit while leaving 128 MB free (on a console with ~400 MB free, up
+  to about 270 MB). If it's larger, the game goes back to reading from disk as
+  needed and, on a mechanical HDD, small hitches may return; in that case,
+  shrink the pack (see [Common issues](#common-issues)).
 - DXT compression is lossy. On higher-resolution textures (from ~128×128, or
   2× the original or more) the difference is practically invisible; small
   textures may show a little grain or small color shifts (see
@@ -240,6 +251,28 @@ colors better. DXT is still lossy, and the result depends on resolution:
   small color shifts may show, because each 4×4 block covers a larger part of
   the drawing.
 
+**Compact mode (`--dxt-compacto`).** Only affects textures with on/off
+transparency (each pixel fully visible or fully transparent): kart and
+character sprites, items, trees. By default they use DXT5 (4 colors per 4×4
+block + separate transparency, 1 byte per pixel); in compact mode they use DXT1
+(3 colors + "transparent", half a byte per pixel).
+
+- **Pros:** sprites at **half the size** — since karts are most of the pack,
+  `tex.pak` shrinks a lot (e.g. from ~210 MB to ~130 MB), more memory is left
+  free and loading gets faster.
+- **Cons:** slightly lower color quality on sprites (about 1.7 dB less in
+  measurements): a little grain or slightly lighter edges may show, more
+  noticeable on low-resolution sprites.
+- Opaque textures and textures with smooth transparency don't change.
+
+To decide, compare both versions on the PC:
+
+```powershell
+py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 20 --zoom 2 --out dxt_preview_padrao
+py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 20 --zoom 2 --compacto --out dxt_preview_compacto
+py .\PACK_TEXTURES.py --pak --dxt --dxt-compacto     # if you like the result
+```
+
 To check before going to the console, `DXT_PREVIEW.py` produces side-by-side
 images (original | DXT) using the same decoder as the console:
 
@@ -249,8 +282,8 @@ py .\DXT_PREVIEW.py extracted_textures\karts\mario\frames --max 30 --zoom 2
 
 Other notes:
 
-- **It does not remove loading hitches.** The first-time stutters in menus
-  come from the *number* of disk reads, not their size.
+- **It helps full loading:** the smaller `tex.pak` is, the more room it has to
+  fit entirely in memory (see the `gfx_pc.c` description).
 - A compressed `tex.pak` **requires the updated `gfx_pc.c` and
   `xbox360_renderer.cpp`**; older builds can't read it. The updated build
   reads both compressed and uncompressed packs.
@@ -345,9 +378,12 @@ It adds the new images to `menu_tiles_geometry.json`. Set the trace back to
 - **Transfer to the console fails at the end** → the Xbox 360's file
   system (FATX) allows a maximum of 4096 files per folder. That's exactly
   what the `--pak` option solves, by producing a single file.
-- **Stutters in-game** → lower the resolution (128×128) or the number of
-  replaced characters. A small hitch when a new opponent appears on screen
-  is expected: their sprites are loaded at that moment.
+- **Stutters in-game** → most likely `tex.pak` didn't fit entirely in memory
+  (it must leave 128 MB free; on a console with ~400 MB free, up to about
+  270 MB). Shrink the pack: use `--dxt`, `--dxt-compacto` (sprites at half the
+  size) or lower the resolution with `HALVE_PNGS.py`. Right after the game
+  starts, loading takes 1 to 2 seconds; entering a race before that may cause
+  a hitch.
 
 ### How it works under the hood
 
