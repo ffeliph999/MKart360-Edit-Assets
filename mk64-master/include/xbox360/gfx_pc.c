@@ -528,13 +528,31 @@ static uint32_t x360_us_since(const LARGE_INTEGER *t0) {
     return (uint32_t)((t1.QuadPart - t0->QuadPart) * 1000000 / x360_st_freq.QuadPart);
 }
 
-#define X360_HDRAM_SLOTS   4096   /* era 1024: o grupo de pre-carregamento dos menus tem ~1800 texturas
-                                        pequenas, e com 1024 o cache descartava as primeiras (as de
-                                        maior prioridade) antes de usar os 40 MB. O limite de bytes
-                                        continua o mesmo. */
-#define X360_HDRAM_BUDGET  (40u << 20)   /* 40 MB: a memoria do 360 e
-                                             unificada, entao este cache
-                                             disputa espaco com a VRAM. */
+#define X360_HDRAM_SLOTS   16384  /* era 4096: com o limite de bytes maior, cabem muito mais
+                                        texturas (karts, menus); a busca usa um indice, entao o
+                                        numero de posicoes nao deixa a busca mais lenta. */
+/* Limite do cache em bytes: uma fracao da memoria LIVRE medida na primeira vez
+   que o cache e usado (a memoria do 360 e unificada: o cache disputa espaco com
+   a VRAM e com o resto do jogo). Medido no console: 320-400 MB livres durante o
+   jogo; com 40 MB fixos o cache enchia em ~3 min e passava a descartar texturas,
+   que depois eram lidas de novo do disco (engasgos em HD mecanico). */
+#define X360_HDRAM_FRACAO_LIVRE 40     /* % da memoria livre */
+#define X360_HDRAM_MIN_MB       40
+#define X360_HDRAM_MAX_MB       160
+static uint32_t x360_hdram_budget_cache;
+static uint32_t x360_hdram_limite(void) {
+    if (!x360_hdram_budget_cache) {
+        MEMORYSTATUS mem;
+        mem.dwLength = sizeof(mem);
+        GlobalMemoryStatus(&mem);
+        uint32_t mb = (uint32_t)((mem.dwAvailPhys >> 20) * X360_HDRAM_FRACAO_LIVRE / 100);
+        if (mb < X360_HDRAM_MIN_MB) mb = X360_HDRAM_MIN_MB;
+        if (mb > X360_HDRAM_MAX_MB) mb = X360_HDRAM_MAX_MB;
+        x360_hdram_budget_cache = mb << 20;
+    }
+    return x360_hdram_budget_cache;
+}
+#define X360_HDRAM_BUDGET (x360_hdram_limite())
 
 struct X360HDRamEntry {
     uint32_t hash, w, h, bytes, last_used;
@@ -544,15 +562,62 @@ struct X360HDRamEntry {
 static struct X360HDRamEntry x360_hdram[X360_HDRAM_SLOTS];
 static uint32_t x360_hdram_bytes, x360_hdram_clock;
 
-/* Busca direta em todas as posicoes. A versao anterior usava enderecamento
-   aberto e parava na primeira posicao vazia; como o descarte zerava posicoes,
-   entradas guardadas depois de um "buraco" ficavam inalcancaveis -- ocupavam
-   memoria e posicao para sempre, e o cache travava cheio. 1024 comparacoes so
-   quando uma textura HD e de fato usada: custo desprezivel. */
+/* Indice hash (enderecamento aberto) das entradas, e pilha de posicoes livres.
+   Uma versao antiga usava enderecamento aberto e, ao descartar, ZERAVA a posicao
+   do indice: a busca parava nesse "buraco" e entradas guardadas depois dele
+   ficavam inalcancaveis (o cache travava cheio). Aqui o descarte deixa uma
+   LAPIDE (-2), que a busca pula; o indice e reconstruido quando acumula lapides. */
+#define X360_HDRAM_IDX 32768                       /* potencia de 2, 2x as posicoes */
+static int16_t x360_hdram_idx[X360_HDRAM_IDX];     /* -1 vazio, -2 lapide, >=0 posicao */
+static uint16_t x360_hdram_livres[X360_HDRAM_SLOTS];
+static int x360_hdram_n_livres, x360_hdram_lapides, x360_hdram_pronto;
+static unsigned x360_hdram_pos(uint32_t hash) {
+    return (hash ^ (hash >> 15) ^ (hash >> 7)) & (X360_HDRAM_IDX - 1);
+}
+static void x360_hdram_reindexa(void) {
+    for (unsigned i = 0; i < X360_HDRAM_IDX; ++i) x360_hdram_idx[i] = -1;
+    x360_hdram_lapides = 0;
+    for (unsigned s = 0; s < X360_HDRAM_SLOTS; ++s) {
+        if (!x360_hdram[s].data) continue;
+        unsigned p = x360_hdram_pos(x360_hdram[s].hash);
+        while (x360_hdram_idx[p] != -1) p = (p + 1) & (X360_HDRAM_IDX - 1);
+        x360_hdram_idx[p] = (int16_t)s;
+    }
+}
+static void x360_hdram_inicia(void) {
+    if (x360_hdram_pronto) return;
+    x360_hdram_n_livres = 0;
+    for (int s = X360_HDRAM_SLOTS - 1; s >= 0; --s)
+        if (!x360_hdram[s].data) x360_hdram_livres[x360_hdram_n_livres++] = (uint16_t)s;
+    x360_hdram_reindexa();
+    x360_hdram_pronto = 1;
+}
 static int x360_hdram_find(uint32_t hash) {
-    for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
-        if (x360_hdram[i].data && x360_hdram[i].hash == hash) return (int)i;
+    x360_hdram_inicia();
+    unsigned p = x360_hdram_pos(hash);
+    for (unsigned n = 0; n < X360_HDRAM_IDX; ++n, p = (p + 1) & (X360_HDRAM_IDX - 1)) {
+        const int s = x360_hdram_idx[p];
+        if (s == -1) return -1;
+        if (s >= 0 && x360_hdram[s].data && x360_hdram[s].hash == hash) return s;
+    }
     return -1;
+}
+static void x360_hdram_idx_insere(int slot) {
+    unsigned p = x360_hdram_pos(x360_hdram[slot].hash);
+    while (x360_hdram_idx[p] >= 0) p = (p + 1) & (X360_HDRAM_IDX - 1);
+    if (x360_hdram_idx[p] == -2) --x360_hdram_lapides;
+    x360_hdram_idx[p] = (int16_t)slot;
+}
+static void x360_hdram_idx_remove(int slot) {
+    unsigned p = x360_hdram_pos(x360_hdram[slot].hash);
+    for (unsigned n = 0; n < X360_HDRAM_IDX; ++n, p = (p + 1) & (X360_HDRAM_IDX - 1)) {
+        if (x360_hdram_idx[p] == -1) return;
+        if (x360_hdram_idx[p] == slot) {
+            x360_hdram_idx[p] = -2;
+            ++x360_hdram_lapides;
+            return;
+        }
+    }
 }
 
 /* Descarta a entrada usada ha mais tempo. Devolve a posicao liberada ou -1. */
@@ -564,28 +629,29 @@ static int x360_hdram_evict_one(void) {
             oldest = x360_hdram[i].last_used; victim = (int)i;
         }
     if (victim < 0) return -1;
+    x360_hdram_idx_remove(victim);
     free(x360_hdram[victim].data);
     x360_hdram_bytes -= x360_hdram[victim].bytes;
     memset(&x360_hdram[victim], 0, sizeof(x360_hdram[victim]));
     ++x360_st_evict;
+    x360_hdram_livres[x360_hdram_n_livres++] = (uint16_t)victim;
+    if (x360_hdram_lapides > X360_HDRAM_IDX / 4) x360_hdram_reindexa();
     return victim;
 }
 
 static void x360_hdram_store_fmt(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src,
                                  uint32_t bytes, uint8_t fmt) {
+    x360_hdram_inicia();
     if (bytes > X360_HDRAM_BUDGET) return;
     /* libera por BYTES... */
     while (x360_hdram_bytes + bytes > X360_HDRAM_BUDGET)
         if (x360_hdram_evict_one() < 0) break;
     /* ...e por POSICOES: antes a tabela enchia de texturas pequenas (karts)
        sem nunca descartar, e nada novo era guardado. */
-    int slot = -1;
-    for (unsigned i = 0; i < X360_HDRAM_SLOTS; ++i)
-        if (!x360_hdram[i].data) { slot = (int)i; break; }
-    if (slot < 0) slot = x360_hdram_evict_one();
-    if (slot < 0) return;
+    if (!x360_hdram_n_livres && x360_hdram_evict_one() < 0) return;
+    const int slot = x360_hdram_livres[--x360_hdram_n_livres];
     uint8_t *buf = (uint8_t *)malloc(bytes);
-    if (!buf) return;
+    if (!buf) { x360_hdram_livres[x360_hdram_n_livres++] = (uint16_t)slot; return; }
     memcpy(buf, src, bytes);
     x360_hdram[slot].hash = hash;
     x360_hdram[slot].w = w;
@@ -595,6 +661,7 @@ static void x360_hdram_store_fmt(uint32_t hash, uint32_t w, uint32_t h, const ui
     x360_hdram[slot].fmt = fmt;
     x360_hdram[slot].last_used = ++x360_hdram_clock;
     x360_hdram_bytes += bytes;
+    x360_hdram_idx_insere(slot);
 }
 
 static void x360_hdram_store(uint32_t hash, uint32_t w, uint32_t h, const uint8_t *src, uint32_t bytes) {
@@ -720,6 +787,83 @@ static uint32_t x360_be32(const uint8_t *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
+/* ---- Carregamento TOTAL do tex.pak em segundo plano -------------------------
+   Em HD mecanico cada leitura isolada custa 20-30 ms (posicionar a cabeca de
+   leitura) e segura um quadro. Se o tex.pak couber na memoria deixando
+   X360_PAK_TUDO_RESERVA_MB livres, uma thread de prioridade baixa le o arquivo
+   INTEIRO, do inicio ao fim, em blocos sequenciais (rapido mesmo em HD), para um
+   unico bloco de memoria. O jogo nunca espera por ela: ao carregar uma textura,
+   se ela ja estiver no bloco, vai direto para a GPU; se ainda nao estiver (so nos
+   primeiros segundos), segue o caminho normal. Depois disso, nenhuma leitura de
+   disco acontece durante o jogo. A thread nao toca no cache: o unico dado
+   compartilhado e "quantos bytes ja foram lidos", publicado com barreira de
+   memoria (o processador do 360 reordena acessos). 0 desliga. */
+#define X360_PAK_TUDO 1
+#define X360_PAK_TUDO_RESERVA_MB 128
+#define X360_PAK_TUDO_BLOCO (2u << 20)
+static uint8_t *x360_tudo_buf;              /* dados do pak a partir de x360_tudo_ini */
+static uint32_t x360_tudo_ini, x360_tudo_total;
+static volatile uint32_t x360_tudo_lido;    /* bytes ja lidos (publicado pela thread) */
+static volatile LONG x360_tudo_fim;         /* 1 = terminou (ou falhou) */
+
+static DWORD WINAPI x360_tudo_thread(LPVOID arg) {
+    (void)arg;
+    HANDLE f = CreateFileA("game:\\tex.pak", GENERIC_READ, FILE_SHARE_READ, NULL,
+                           OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (f != INVALID_HANDLE_VALUE &&
+        SetFilePointer(f, (LONG)x360_tudo_ini, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER) {
+        uint32_t lido = 0;
+        while (lido < x360_tudo_total) {
+            DWORD pedir = x360_tudo_total - lido, got = 0;
+            if (pedir > X360_PAK_TUDO_BLOCO) pedir = X360_PAK_TUDO_BLOCO;
+            if (!ReadFile(f, x360_tudo_buf + lido, pedir, &got, NULL) || !got) break;
+            lido += got;
+            MemoryBarrier();             /* os dados ficam visiveis ANTES do contador */
+            x360_tudo_lido = lido;
+        }
+    }
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    MemoryBarrier();
+    InterlockedExchange(&x360_tudo_fim, 1);
+    return 0;
+}
+
+/* Chamado ao abrir o pak: decide se cabe e inicia a thread. */
+static void x360_tudo_inicia(HANDLE f, uint32_t ini) {
+#if X360_PAK_TUDO
+    const DWORD tam = GetFileSize(f, NULL);
+    if (tam == INVALID_FILE_SIZE || tam <= ini) return;
+    const uint32_t total = tam - ini;
+    MEMORYSTATUS mem;
+    mem.dwLength = sizeof(mem);
+    GlobalMemoryStatus(&mem);
+    if ((uint64_t)mem.dwAvailPhys < (uint64_t)total + ((uint64_t)X360_PAK_TUDO_RESERVA_MB << 20))
+        return;                          /* nao cabe com folga: fica o modo normal */
+    x360_tudo_buf = (uint8_t *)malloc(total);
+    if (!x360_tudo_buf) return;
+    x360_tudo_ini = ini;
+    x360_tudo_total = total;
+    HANDLE t = CreateThread(NULL, 0, x360_tudo_thread, NULL, CREATE_SUSPENDED, NULL);
+    if (!t) { free(x360_tudo_buf); x360_tudo_buf = NULL; return; }
+    XSetThreadProcessor(t, 5);           /* longe da thread principal do jogo */
+    SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL);
+    ResumeThread(t);
+    CloseHandle(t);
+#else
+    (void)f; (void)ini;
+#endif
+}
+
+/* Dados de uma entrada, se a thread ja os leu; senao NULL. */
+static const uint8_t *x360_tudo_dados(uint32_t off, uint32_t size) {
+    if (!x360_tudo_buf || off < x360_tudo_ini) return NULL;
+    const uint32_t lido = x360_tudo_lido;
+    MemoryBarrier();                     /* le o contador ANTES dos dados */
+    const uint32_t rel = off - x360_tudo_ini;
+    if (rel > lido || size > lido - rel) return NULL;
+    return x360_tudo_buf + rel;
+}
+
 static void x360_pak_open(void) {
     if (x360_pak_tried) return;
     x360_pak_tried = true;
@@ -762,6 +906,7 @@ static void x360_pak_open(void) {
     free(raw);
     x360_pak_count = count;
     x360_pak_file = f;
+    x360_tudo_inicia(f, 12 + bytes);     /* dados comecam depois do cabecalho e do indice */
 
     /* Tabela com o dobro da capacidade (arredondado para potencia de 2),
        para manter as colisoes baixas. */
@@ -1070,6 +1215,7 @@ static void x360_preload_step(void) {
     if (x360_pre_done || gGamestate == 4 /* RACING */) return;
     x360_pak_open();
     if (x360_pak_file == INVALID_HANDLE_VALUE || !x360_pak_index) { x360_pre_done = true; return; }
+    if (x360_tudo_buf) { x360_pre_done = true; return; }   /* o carregamento total cuida disso */
     if (!x360_pre_boot_tried) {                 /* primeiro quadro: tudo de uma vez */
         x360_preload_boot();
         if (x360_pre_done) return;
@@ -1119,6 +1265,23 @@ static void x360_hd_upload(const uint8_t *data, uint32_t w, uint32_t h, uint8_t 
 
 static bool x360_try_load_hd_texture(uint32_t hash) {
     if (x360_hdtex_lookup(hash) == X360_HDTEX_ST_MISS) return false;
+
+    /* Carregamento total: se a thread ja leu esta textura, vai direto do bloco
+       para a GPU -- sem disco e sem copia. */
+    if (x360_tudo_buf) {
+        const struct X360PakEntry *e = x360_pak_find(hash);
+        if (e && e->w && e->h && e->w <= 2048 && e->h <= 2048 && e->fmt <= 2 &&
+            e->size && e->size == x360_dxt_size(e->w, e->h, e->fmt)) {
+            const uint8_t *d = x360_tudo_dados(e->off, e->size);
+            if (d) {
+                ++x360_st_ramhit; ++x360_st_up;
+                x360_st_upkb += (e->w * e->h * 4) >> 10;
+                x360_hd_upload(d, e->w, e->h, (uint8_t)e->fmt);
+                x360_hdtex_remember(hash, X360_HDTEX_ST_HIT);
+                return true;
+            }
+        }
+    }
 
     /* Caminho rapido: ja esta em RAM, nao toca no disco. */
     int slot = x360_hdram_find(hash);
