@@ -155,7 +155,7 @@ Options:
                            quality loss. Does not change the PNGs.
                            Recommended for very high resolution packs.
 
-  --reduzir PASTA=TAMANHO  Reduces only one folder, in pixels or percent.
+  --reduzir FOLDER=SIZE    Reduces only one folder, in pixels or percent.
                            E.g.: --reduzir karts=192
                                  --reduzir generated/course_player_selection=75%
                            Does not change the PNGs (to change the PNGs
