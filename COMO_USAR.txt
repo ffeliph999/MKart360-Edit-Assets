@@ -18,7 +18,11 @@ Renomeie sua ROM e coloque-a aqui:
 
 `MKart360-Edit-Assets\mk64-master\baserom.br.z64`
 
-Por exemplo:
+Por exemplo, se a sua ROM se chama `Mario Kart 64 (USA).z64`, renomeie-a
+para `baserom.br.z64`.
+
+O jogo aceita a versão americana (USA) e a brasileira, e identifica qual é
+pelo conteúdo, não pelo nome. A ROM precisa estar no formato `.z64`.
 
 ------------------------------------------------------------------------
 
@@ -144,23 +148,27 @@ necessárias para os fundos coloridos dos menus.
 O Xbox 360 possui 512 MB de memória compartilhada entre o sistema e os
 gráficos, e o jogo já utiliza parte dessa memória.
 
-Com todos os 2568 sprites incluídos, usando dois arquivos por sprite,
-os tamanhos aproximados das imagens brutas em RGBA32 seriam:
+Com todos os 2568 sprites de karts incluídos (duas metades por sprite),
+o tamanho aproximado das texturas seria:
 
 ```text
-256×256  →  ~640 MB
-128×128  →  ~160 MB
-96×96    →  ~90 MB
+Resolução   Sem compressão   Com --dxt
+256×256     ~640 MB          ~160 MB
+128×128     ~160 MB          ~40 MB
+96×96       ~90 MB           ~23 MB
 ```
 
-Esses valores são estimativas do tamanho dos dados brutos das imagens e
-não representam o uso real de memória final do jogo.
+Com o `--dxt`, os karts em 256×256 ocupam o mesmo que em 128×128 sem
+compressão. Por isso, use sempre o `--dxt` em pacotes HD.
 
-Resoluções maiores exigem mais memória e aumentam o custo de
-carregamento.
+O jogo é desenhado em 720p, mesmo com o console em 1080p. Nessa
+resolução, um sprite de kart ocupa no máximo 192×192 pixels na tela;
+acima disso, a diferença quase não aparece, mas a memória cresce. O
+`--reduzir-auto` (veja o passo 10) limita os karts, os menus e o HUD a
+esse tamanho na hora de empacotar, sem alterar os seus PNGs.
 
-Por isso, 128×128 pode ser uma boa opção para melhorar a qualidade
-visual sem utilizar tanta memória quanto 256×256.
+Quando o `tex.pak` final tem até uns 270 MB, ele é carregado inteiro na
+memória ao abrir o jogo, e não há leituras de disco durante as corridas.
 
 ------------------------------------------------------------------------
 
@@ -197,7 +205,7 @@ Cria um único arquivo `tex.pak`. Recomendado.
 
 Gera um tex.pak comprimido utilizando o algorítmo DXT, (nativamente suportado pelo xbox360) (altamente recomendado para pacotes de textura em HD com texturas acima de 256x256 pixels)
 
-`--dxt-compacto`
+`--dxt-compacto` (ex: `py .\PACK_TEXTURES.py --pak --dxt --dxt-compacto`)
 
 Gera um tex.pak comprimido no **Modo compacto (`--dxt-compacto`).** Afeta só as texturas com transparência
 "liga/desliga" (cada pixel totalmente visível ou totalmente transparente): os
@@ -208,6 +216,10 @@ compacto usam DXT1 (3 cores + "transparente", meio byte por pixel). isso deixa o
   claras, mais perceptíveis em sprites de baixa resolução. Use se seu tex.pak convencional exceder
 270MB, pois paks maiores que isso impossibilitam de serem carregados direto na RAM, podendo causar
 problemas de desempenho se o jogo estiver em um HD mecânico.
+
+`--reduzir-auto` ou `--reduzir PASTA=TAMANHO` (ex: --reduzir karts=192), (ex2: --reduzir generated/course_player_selection=75%)
+
+Reduz os sprites PNG dos karts, lakitu, menus e hud antes de empacota-los ao tex.pak limitando-os a resolução de renderização do jogo na tela (720p), diminuindo o tamanho do tex.pak para que ele possa caber na memoria, evitando problemas de desempenho, a perda de qualidade é quase imperceptivel, recomendado se você utilizou um pacote de texturas em HD de resolução muito alta. (nota: "--reduzir" não modifica os PNGs originais, apenas reduz uma copia que vai para o pak, se você quer reduzir os pngs originais, utilize HALVE_PNGS.py)
 
 `--only PREFIX`
 
@@ -258,7 +270,7 @@ modificou.
 
 Texturas que não foram editadas podem gerar arquivos que substituem
 as texturas originais por cópias idênticas, sem proporcionar nenhuma
-melhoria visual e ainda ocupando espaço adicional.
+melhoria visual e ainda ocupando espaço adicional, podendo causar problemas de desempenho.
 
 ------------------------------------------------------------------------
 

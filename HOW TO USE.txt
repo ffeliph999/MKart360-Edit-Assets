@@ -2,23 +2,28 @@
 
 ### 1. Install Visual Studio 2010 and the Xbox 360 XDK or SDK
 
-These are required to compile the project for Xbox 360.
+They are required to build the project for Xbox 360.
 
 ------------------------------------------------------------------------
 
 ### 2. Copy the Patch
 
-Copy the patch into the `MKart360-Edit-Assets-sincronizacao` folder.
+Copy the patch into the `MKart360-Edit-Assets` folder.
 
 ------------------------------------------------------------------------
 
-### 3. Add Your ROM
+### 3. Add your ROM
 
 Rename your ROM and place it here:
 
-`MKart360-Edit-Assets-sincronizacao\mk64-master\baserom.br.z64`
+`MKart360-Edit-Assets\mk64-master\baserom.br.z64`
 
-For example:
+For example, if your ROM is named `Mario Kart 64 (USA).z64`, rename it to
+`baserom.br.z64`.
+
+The game accepts the American (USA) and Brazilian versions, and tells
+which one it is by its content, not by its name. The ROM must be in `.z64`
+format.
 
 ------------------------------------------------------------------------
 
@@ -36,13 +41,13 @@ Close and reopen PowerShell, then check the installation:
 py --version
 ```
 
-If you see something similar to:
+If you see something like:
 
 ```text
 Python 3.13.x
 ```
 
-Python is installed correctly.
+Python was installed correctly.
 
 ------------------------------------------------------------------------
 
@@ -56,7 +61,7 @@ pip install pillow
 
 ------------------------------------------------------------------------
 
-### 6. Set Up the Windows Asset Tools
+### 6. Set up the Windows Asset Tools
 
 Run:
 
@@ -64,12 +69,12 @@ Run:
 powershell -ExecutionPolicy Bypass -File ".\xbox360\setup_windows_asset_tools.ps1" -SkipTorch
 ```
 
-This prepares the tools needed to work with the MK64 assets and textures
-on Windows.
+This prepares the tools needed to work with the MK64 assets and
+textures on Windows.
 
 ------------------------------------------------------------------------
 
-### 7. Prepare the ROM and Assets
+### 7. Prepare the ROM and the Assets
 
 Run:
 
@@ -77,7 +82,7 @@ Run:
 py .\PUBLIC_PREPARE_MK64_ASSETS.py
 ```
 
-This step prepares the ROM and the assets required for the texture
+This step prepares the ROM and the assets needed for the texture
 extraction and editing workflow.
 
 ------------------------------------------------------------------------
@@ -91,18 +96,18 @@ py .\EXTRACT_MK64_TEXTURES.py
 ```
 
 The script extracts the textures and also automatically prepares and
-synchronizes the manifests required by the HD texture system.
+syncs the manifests needed by the HD texture system.
 
 **IMPORTANT:**
 
-You no longer need to manually copy any `.json` files from
-`manifest_runtime` to `extracted_textures`.
+There is no need to manually copy any `.json` file from the
+`manifest_runtime` folder to `extracted_textures`.
 
-`EXTRACT_MK64_TEXTURES.py` handles this synchronization automatically.
+`EXTRACT_MK64_TEXTURES.py` does this sync automatically.
 
 If the script detects that `extracted_textures` has already been
-extracted, it enters continuation mode and avoids overwriting textures
-you have already edited.
+extracted, it switches to resume mode and avoids overwriting the
+textures you have already edited.
 
 ------------------------------------------------------------------------
 
@@ -114,8 +119,8 @@ The extracted textures will be placed in:
 extracted_textures
 ```
 
-Open the PNG files and edit any textures you want. You can upscale them,
-redraw them, or completely replace the original texture.
+Open the PNG files and edit the textures you want. You can increase the
+resolution, redraw them or completely replace the original texture.
 
 You can also increase the resolution. For example, a 64×64 texture can
 be replaced with a 128×128 version.
@@ -124,44 +129,47 @@ be replaced with a 128×128 version.
 
 Do not rename the files or change the folder structure.
 
-The file name and path stored in the manifests are used to match the
-edited texture with the original texture in the game.
+The file name and the path stored in the manifests are used to link the
+edited texture to the original texture in the game.
 
-After adding or modifying an HD menu background texture, run:
+After adding or changing an HD menu background texture, run again:
 
 ```powershell
 py .\EXTRACT_MK64_TEXTURES.py
 ```
 
-again.
-
 The script can detect the HD images already present and generate the
-required variants for the colored menu backgrounds.
+variants needed for the colored menu backgrounds.
 
 ------------------------------------------------------------------------
 
 ## MEMORY LIMITS
 
-The Xbox 360 has 512 MB of shared memory for the system and graphics,
-and the game already uses part of that memory.
+The Xbox 360 has 512 MB of memory shared between the system and the
+graphics, and the game already uses part of that memory.
 
-With all 2568 sprites included, using two files per sprite, the
-approximate raw RGBA32 image sizes would be:
+With all 2568 kart sprites included (two halves per sprite), the
+approximate size of the textures would be:
 
 ```text
-256×256  →  ~640 MB
-128×128  →  ~160 MB
-96×96    →  ~90 MB
+Resolution  Uncompressed     With --dxt
+256×256     ~640 MB          ~160 MB
+128×128     ~160 MB          ~40 MB
+96×96       ~90 MB           ~23 MB
 ```
 
-These are estimates of the raw image data and do not represent the
-actual final memory usage of the game.
+With `--dxt`, 256×256 karts take the same memory as 128×128 ones
+uncompressed. That's why you should always use `--dxt` for HD packs.
 
-Higher texture resolutions require more memory and increase loading
-costs.
+The game is rendered at 720p, even with the console set to 1080p. At
+that resolution a kart sprite covers at most 192×192 screen pixels;
+above that the difference barely shows, but memory grows.
+`--reduzir-auto` (see step 10) caps karts, menus and HUD at that size at
+pack time, without changing your PNGs.
 
-Because of this, 128×128 can be a good option for improving image
-quality without using as much memory as 256×256.
+When the final `tex.pak` is up to about 270 MB, it is loaded entirely
+into memory when the game starts, and there are no disk reads during
+races.
 
 ------------------------------------------------------------------------
 
@@ -173,7 +181,7 @@ If you only modified one texture folder, such as the karts, run:
 py .\PACK_TEXTURES.py --only karts --pak --dxt
 ```
 
-If you modified textures from multiple folders or all texture folders,
+If you modified textures in several folders or in all texture folders,
 run:
 
 ```powershell
@@ -188,7 +196,7 @@ tex\tex.pak
 
 This is a single file containing the packed textures.
 
-#### Available Options
+#### Available options
 
 `--pak`
 
@@ -196,7 +204,23 @@ Creates a single `tex.pak` file. Recommended.
 
 `--dxt`
 
-generates a compressed tex.pak using the DXT algorithm (natively supported by xbox360)
+Generates a tex.pak compressed with the DXT algorithm (natively supported by the Xbox 360) (highly recommended for HD texture packs with textures above 256x256 pixels)
+
+`--dxt-compacto` (e.g.: `py .\PACK_TEXTURES.py --pak --dxt --dxt-compacto`)
+
+Generates a tex.pak compressed in **Compact mode (`--dxt-compacto`).** It only affects textures with on/off
+transparency (each pixel fully visible or fully transparent): kart and
+character sprites, items, trees. By default they use DXT5 (4
+colors per 4×4 block + separate transparency, 1 byte per pixel); in
+compact mode they use DXT1 (3 colors + "transparent", half a byte per pixel). This makes the PAK much smaller, but at the cost of color quality on the sprites (about 1.7 dB
+  less in measurements): a little grain or slightly lighter edges may
+  show, more noticeable on low-resolution sprites. Use it if your regular tex.pak exceeds
+270MB, because packs larger than that can't be loaded straight into RAM, which may cause
+performance issues if the game is on a mechanical HDD.
+
+`--reduzir-auto` or `--reduzir PASTA=TAMANHO` (e.g.: --reduzir karts=192), (e.g. 2: --reduzir generated/course_player_selection=75%)
+
+Reduces the kart, Lakitu, menu and HUD PNG sprites before packing them into tex.pak, capping them at the game's on-screen render resolution (720p), shrinking tex.pak so that it can fit in memory and avoiding performance issues. The quality loss is almost imperceptible; recommended if you used a very high resolution HD texture pack. (note: "--reduzir" does not modify the original PNGs, it only reduces a copy that goes into the pak; if you want to reduce the original PNGs, use HALVE_PNGS.py)
 
 `--only PREFIX`
 
@@ -228,23 +252,31 @@ Default:
 2048
 ```
 
-Without `--pak`, the script creates individual `.tex` files inside
+Without `--pak`, the script creates individual `.tex` files inside the
 subfolders.
 
-The `.pak` format is recommended for the final version. Individual `.tex`
-files can be useful for testing or debugging.
+The `.pak` format is recommended for the final version. The individual
+`.tex` files can be useful for testing or debugging.
+
+DXT compression is recommended for very large textures, above 256x256.
+If your texture pack has more than 200MB in total, using --dxt is
+highly recommended, because it will generate a much smaller tex.pak and
+will be lighter for the Xbox 360 to process. But be aware: very small
+textures tend to look worse with DXT, because it is a lossy compression
+format.
 
 **IMPORTANT:**
 
-Whenever possible, only pack the textures you actually modified.
+Whenever possible, pack only the textures you actually modified.
 
-Unedited textures can generate files that replace the original textures
-with identical copies, providing no visual improvement while taking up
-additional space.
+Textures that were not edited may generate files that replace the
+original textures with identical copies, providing no visual
+improvement while still taking up extra space, which may cause
+performance issues.
 
 ------------------------------------------------------------------------
 
-### 11. Compile the Project for Xbox 360
+### 11. Build the Project for Xbox 360
 
 Run:
 
@@ -252,7 +284,7 @@ Run:
 powershell -ExecutionPolicy Bypass -File ".\PUBLIC_BUILD_XBOX360.ps1"
 ```
 
-The `PUBLIC_PREPARE_MK64_ASSETS.py` step was already completed earlier,
+The `PUBLIC_PREPARE_MK64_ASSETS.py` step was already run earlier,
 before extracting the textures.
 
 ------------------------------------------------------------------------
@@ -262,20 +294,20 @@ before extracting the textures.
 Copy `MK64.xex` from:
 
 ```text
-MKart360-Edit-Assets-sincronizacao\MK64\Release\MK64.xex
+MKart360-Edit-Assets\MK64\Release\MK64.xex
 ```
 
 ------------------------------------------------------------------------
 
 ### 13. Create the Game Folder
 
-Create a folder with any name you want. For example:
+Create a folder with any name you like. For example:
 
 ```text
 MK64
 ```
 
-Place the following files inside it:
+Put the following files inside it:
 
 ```text
 baserom.br.z64
@@ -283,4 +315,4 @@ MK64.xex
 tex.pak
 ```
 
-That's it. You're ready to run the game on Xbox 360.
+Done. You're now ready to run the game on the Xbox 360.
