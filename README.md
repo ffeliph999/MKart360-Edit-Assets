@@ -132,7 +132,7 @@ All the scripts below must be executed from within the `mk64-master/` folder; th
 |---|---|
 | `EXTRACT_MK64_TEXTURES.py` | Extracts textures from the ROM into editable PNGs |
 | `PACK_TEXTURES.py` | Packs edited PNGs back into the format the game reads (`tex.pak`) |
-| `HALVE_PNGS.py` | Reduces PNG resolution (half, factor, percentage, max side or exact size) to fit the console's memory; use it for very large textures or if you encounter performance issues |
+| `HALVE_PNGS.py` | Optional: changes the PNG files themselves, reducing their resolution (half, factor, percentage, max side or exact size). To fit the console's memory, prefer `--reduzir-auto` in `PACK_TEXTURES.py`, which reduces at pack time without touching the PNGs |
 | `DXT_PREVIEW.py` | Shows on the PC, side by side with the original, how each texture will look with `--dxt` (uses the same decoder as the console) |
 | `SCAN_HALVES.py` | Diagnostic tool: finds where the "bottom halves" of kart sprites live when their hash doesn't match |
 | `CROSS_CHECK.py` | Cross-references the game's trace log with the manifests to find textures that weren't found |
@@ -192,6 +192,8 @@ Generates `tex\tex.pak`, a single file with everything bundled inside.
 | `--dxt` | With `--pak`: stores textures compressed as DXT1/DXT5 (**recommended**, see below) |
 | `--dxt-compacto` | With `--dxt`: sprites with on/off transparency as DXT1 (half the size, slightly lower quality) |
 | `--dxt-sem-ajuste` | With `--dxt`: doesn't resample crops that aren't multiples of 4 (they stay uncompressed) |
+| `--reduzir-auto` | Caps karts, Lakitu, menus and HUD at 3× the original size (the port's 720p equivalent), without changing the PNGs (**recommended**, see [Memory limits](#memory-limits)) |
+| `--reduzir FOLDER=SIZE` | Reduces the images of a folder at pack time, without changing the PNGs. E.g. `karts=192` (longest side up to 192 px) or `karts=75%`. Repeatable; takes priority over `--reduzir-auto` |
 
 Without `--pak`, thousands of loose `.tex` files are generated — it works,
 but loads more slowly and is more fragile to transfer; use it only for
@@ -302,18 +304,39 @@ character roster adds up to 2568 sprites (2 halves each):
 With `--dxt`, 256×256 karts take the same memory as 128×128 ones
 uncompressed, at twice the resolution.
 
-To shrink already-edited PNGs (with no size option, it halves them):
+**Useful resolution.** The port renders at 1280×720 (720p) even with the
+console set to 1080p — the Xbox 360 itself upscales the output. At 720p each N64
+pixel becomes 3 screen pixels: an N64 kart sprite (64×64) covers at most
+**192×192** screen pixels. Above that the difference barely shows, but memory
+grows.
+
+**Reduce at pack time (recommended).** `PACK_TEXTURES.py` reduces images while
+building `tex.pak`, **without changing the PNGs** — you can try other sizes just
+by changing the option:
 
 ```powershell
-py .\HALVE_PNGS.py --recursive                     # preview, doesn't change anything
-py .\HALVE_PNGS.py --apply --recursive             # actually applies it (half)
-py .\HALVE_PNGS.py --max 256 --recursive --apply   # caps the longest side at 256 px
+py .\PACK_TEXTURES.py --pak --dxt --reduzir-auto                   # karts, menus and HUD up to 3× the original
+py .\PACK_TEXTURES.py --pak --dxt --reduzir karts=192              # karts only, longest side up to 192 px
+py .\PACK_TEXTURES.py --pak --dxt --reduzir-auto --reduzir karts/mario=128
 ```
 
-Other ways to pick the size: `--fator N` (divide by N), `--escala P`
-(percentage) and `--tamanho WxH` (exact size). Dimensions are always kept as
-multiples of 4, for DXT. Use `--backup` to keep the originals as `*.orig.png`
-and `--restaurar` to bring them back.
+- `--reduzir-auto` only acts on textures drawn at N64 scale: karts, Lakitu,
+  menus (`course_player_selection`, `texture_tkmk00`) and HUD/fonts
+  (`texture_data_2`). Course and 3D object textures are left out: close to the
+  camera they show up heavily magnified, and high resolution makes a difference.
+- `--reduzir FOLDER=SIZE` accepts pixels (`karts=192`) or a percentage
+  (`karts=75%`), can be repeated and takes priority over `--reduzir-auto`.
+- Both options only reduce: a texture already within the limit is left as is.
+  They keep the aspect ratio and use multiples of 4, for DXT.
+
+With 256×256 karts, `--reduzir-auto` stores them at 192×192: about 44% less
+sprite memory, with practically the same sharpness in game.
+
+**Changing the PNGs themselves (optional).** To distribute an already reduced
+pack or save space in the folder, `HALVE_PNGS.py` (in `legacy_diagnostic_tools/`)
+changes the files. With no size option it halves them; it also accepts
+`--fator N`, `--escala P`, `--max N` and `--tamanho WxH`. Use `--backup` to keep
+the originals as `*.orig.png` and `--restaurar` to bring them back.
 
 ### Diagnostics (when a texture doesn't show up in HD)
 
@@ -380,8 +403,9 @@ It adds the new images to `menu_tiles_geometry.json`. Set the trace back to
   what the `--pak` option solves, by producing a single file.
 - **Stutters in-game** → most likely `tex.pak` didn't fit entirely in memory
   (it must leave 128 MB free; on a console with ~400 MB free, up to about
-  270 MB). Shrink the pack: use `--dxt`, `--dxt-compacto` (sprites at half the
-  size) or lower the resolution with `HALVE_PNGS.py`. Right after the game
+  270 MB). Shrink the pack: use `--dxt`, `--reduzir-auto` (karts, menus and HUD
+  at the useful size for 720p) and, if still needed, `--dxt-compacto` (sprites
+  at half the size). Right after the game
   starts, loading takes 1 to 2 seconds; entering a race before that may cause
   a hitch.
 

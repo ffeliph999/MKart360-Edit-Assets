@@ -84,6 +84,72 @@ _HASH_DEDUP_COUNT = 0
 _HASH_COLLISIONS = []
 
 
+# --- Reducao na hora de empacotar (--reduzir PASTA=TAMANHO) -------------------
+# Reduz as imagens de uma pasta ANTES de recortar, sem mexer nos PNGs. Ex.: em
+# 720p um sprite de kart do N64 (64x64) ocupa ate 192x192 pixels na tela, entao
+# --reduzir karts=192 guarda os karts nesse tamanho mesmo que os PNGs sejam 256.
+REGRAS_REDUZIR = []          # [(prefixo, ("px", N) | ("%", P))]
+N_REDUZIDAS = [0]
+# --reduzir-auto: limita a 3x o tamanho ORIGINAL (o port renderiza em 720p = 3
+# pixels de tela por pixel do N64) so as texturas desenhadas na escala do N64.
+# Texturas de pista e de objetos 3D ficam de fora: perto da camera aparecem muito
+# ampliadas e a resolucao alta faz diferenca.
+REDUZIR_AUTO = [False]
+AUTO_FATOR = 3
+AUTO_PASTAS = ("karts", "lakitu", "generated/course_player_selection",
+               "generated/texture_tkmk00", "generated/texture_data_2")
+
+
+def regra_reduzir(texto):
+    if "=" not in texto:
+        raise SystemExit(f"--reduzir deve ser PASTA=TAMANHO (ex.: karts=192 ou karts=75%), recebi: {texto}")
+    pasta, valor = texto.split("=", 1)
+    pasta = pasta.strip().replace("\\", "/").strip("/").lower()
+    valor = valor.strip()
+    try:
+        regra = ("%", float(valor[:-1])) if valor.endswith("%") else ("px", int(valor))
+    except ValueError:
+        raise SystemExit(f"--reduzir: tamanho invalido em {texto}")
+    if regra[1] <= 0:
+        raise SystemExit(f"--reduzir: tamanho invalido em {texto}")
+    return pasta, regra
+
+
+def reduzir_img(img, rel, orig=None):
+    """Aplica a regra de --reduzir mais especifica (prefixo mais longo) que case
+    com o caminho do PNG; sem regra manual, aplica --reduzir-auto (3x o tamanho
+    original `orig`, so nas pastas de AUTO_PASTAS). So reduz -- uma textura ja
+    dentro do limite passa intacta; mantem a proporcao; multiplos de 4 quando
+    isso nao distorcer mais de 1%."""
+    if not REGRAS_REDUZIR and not REDUZIR_AUTO[0]:
+        return img
+    rel = rel.replace("\\", "/").lower()
+    melhor = None
+    for pasta, regra in REGRAS_REDUZIR:
+        if pasta in ("", "*", "tudo") or rel == pasta or rel.startswith(pasta + "/"):
+            if melhor is None or len(pasta) > len(melhor[0]):
+                melhor = (pasta, regra)
+    w, h = img.size
+    if melhor is not None:
+        tipo, val = melhor[1]
+        f = (val / 100.0) if tipo == "%" else (val / max(w, h))
+    elif (REDUZIR_AUTO[0] and orig and orig[0] and orig[1]
+          and any(rel.startswith(pasta + "/") for pasta in AUTO_PASTAS)):
+        f = min(AUTO_FATOR * orig[0] / w, AUTO_FATOR * orig[1] / h)
+    else:
+        return img
+    if f >= 1.0:
+        return img
+    ew, eh = w * f, h * f
+    nw, nh = max(4, int(round(ew / 4)) * 4), max(4, int(round(eh / 4)) * 4)
+    if abs((nw / nh) / (w / h) - 1.0) > 0.01:
+        nw, nh = max(1, int(round(ew))), max(1, int(round(eh)))
+    if (nw, nh) == (w, h):
+        return img
+    N_REDUZIDAS[0] += 1
+    return img.resize((nw, nh), Image.LANCZOS)
+
+
 def write_tex(outdir, hash_hex, img, source=""):
     global _HASH_DEDUP_COUNT
     w, h = img.size
@@ -400,6 +466,12 @@ def main():
     ap.add_argument("--dxt", action="store_true",
                     help="com --pak: comprime as texturas em DXT1/DXT5 (4-8x menor). "
                          "Exige o gfx_pc.c com suporte a DXT.")
+    ap.add_argument("--reduzir", action="append", default=[], metavar="PASTA=TAMANHO",
+                    help="reduz as imagens de uma pasta ao empacotar, sem mexer nos PNGs "
+                         "(ex.: karts=192 = lado maior ate 192 px; karts=75%% = 75%%). Pode repetir.")
+    ap.add_argument("--reduzir-auto", action="store_true",
+                    help="limita karts, Lakitu, menus e HUD a 3x o tamanho original (a resolucao "
+                         "de 720p do port); texturas de pista ficam de fora. --reduzir tem prioridade.")
     ap.add_argument("--dxt-sem-ajuste", action="store_true",
                     help="com --dxt: NAO reamostra recortes fora de multiplos de 4 (ficam sem compressao)")
     ap.add_argument("--dxt-compacto", action="store_true",
@@ -416,6 +488,14 @@ def main():
     ap.add_argument("--diagnose-yoshi", action="store_true",
                     help="mostra hashes/tiles de Yoshi sem gerar o PAK")
     a = ap.parse_args()
+    for r in a.reduzir:
+        REGRAS_REDUZIR.append(regra_reduzir(r))
+    REDUZIR_AUTO[0] = a.reduzir_auto
+    if a.reduzir_auto:
+        print(f"reducao automatica: ate {AUTO_FATOR}x o original em " + ", ".join(AUTO_PASTAS))
+    if REGRAS_REDUZIR:
+        print("reducao ao empacotar: " + ", ".join(
+            f"{p or 'tudo'} -> {v:g}{'%' if t == '%' else ' px'}" for p, (t, v) in REGRAS_REDUZIR))
 
     indir = Path(a.indir)
     outdir = Path(a.outdir)
@@ -522,7 +602,13 @@ def main():
             missed.append(rel)
             continue
 
-        img = Image.open(png).convert("RGBA")
+        _orig = None
+        if entry and entry.get("width") and entry.get("height"):
+            try:
+                _orig = (int(entry["width"]), int(entry["height"]))
+            except (TypeError, ValueError):
+                _orig = None
+        img = reduzir_img(Image.open(png).convert("RGBA"), rel, _orig)
         w, hgt = img.size
 
         # TKMK00 EXATO: texture_name_* e texture_ok foram medidos como
@@ -763,7 +849,8 @@ def main():
                 tiles = e.get("tiles") or []
                 if not png.is_file() or not tiles:
                     continue
-                img_a = Image.open(png).convert("RGBA")
+                img_a = reduzir_img(Image.open(png).convert("RGBA"), str(e.get("png", "")),
+                                    (int(e.get("width") or 0), int(e.get("height") or 0)))
                 wa, ha = img_a.size
                 W, H = int(e["width"]), int(e["height"])
                 # blocos que passam da borda: estende repetindo a ultima linha/coluna
@@ -807,6 +894,39 @@ def main():
             except ImportError:
                 sys.exit("--dxt precisa do numpy: pip install numpy")
 
+        # 1o passo: comprime tudo (com --dxt), para o pre-carregamento contar o
+        # tamanho REAL de cada textura no pak
+        cont = {0: 0, 1: 0, 2: 0}
+        antes = depois = 0
+        sem_dxt = []          # (hash, w, h, bytes, origem) das que ficaram sem compressao
+        n_ajustadas = 0
+        final = []            # por indice de PAK_ENTRIES: (w, h, fmt, dados)
+        if a.dxt:
+            print(f"comprimindo {len(PAK_ENTRIES)} texturas em DXT...")
+        for k, (hh, w, h, raw) in enumerate(PAK_ENTRIES):
+            tam_orig = len(raw)
+            fmt, dados = 0, raw
+            if (a.dxt and not a.dxt_sem_ajuste and (w % 4 or h % 4)
+                    and hh.lower() not in DXT_NUNCA):
+                raw, w, h = _ajusta_multiplo4(raw, w, h)
+                n_ajustadas += 1
+            if a.dxt and w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
+                fmt, dados = dxt_encode(raw, w, h, compacto=a.dxt_compacto)
+            cont[fmt] += 1
+            antes += tam_orig; depois += len(dados)
+            if a.dxt and fmt == 0:
+                sem_dxt.append((hh, w, h, len(raw), _PAK_SOURCE.get(hh, "")))
+            final.append((w, h, fmt, dados))
+            if a.dxt and (k + 1) % 1000 == 0:
+                print(f"  {k + 1}/{len(PAK_ENTRIES)}")
+        if a.dxt:
+            print(f"DXT: {cont[1]} DXT1, {cont[2]} DXT5, {cont[0]} sem compressao "
+                  f"| {antes/1024/1024:.0f} MB -> {depois/1024/1024:.0f} MB")
+            if n_ajustadas:
+                print(f"  {n_ajustadas} recorte(s) reamostrado(s) para multiplos de 4 para poder comprimir")
+            if sem_dxt:
+                _relatorio_sem_dxt(sem_dxt, outdir / "dxt_sem_compressao.txt")
+
         # ordem dos dados: grupo de pre-carregamento primeiro (contiguo, por
         # prioridade), depois o resto na ordem original
         cand = []
@@ -817,7 +937,7 @@ def main():
         cand.sort()
         pre_idx, pre_bytes = [], 0
         for pr, _src, k in cand:
-            tam = len(PAK_ENTRIES[k][3])
+            tam = len(final[k][3])            # tamanho real no pak (comprimido, com --dxt)
             if pre_bytes + tam > PRELOAD_MB * 1024 * 1024:
                 continue
             pre_idx.append(k)
@@ -831,45 +951,21 @@ def main():
         index_size = len(PAK_ENTRIES) * 24
         data_off = len(header) + index_size
         index, blob, cur = b"", [], data_off
-        cont = {0: 0, 1: 0, 2: 0}
-        antes = depois = 0
-        sem_dxt = []          # (hash, w, h, bytes, origem) das que ficaram sem compressao
-        n_ajustadas = 0
-        if a.dxt:
-            print(f"comprimindo {len(PAK_ENTRIES)} texturas em DXT...")
-        for n_i, k in enumerate(ordem, 1):
-            hh, w, h, raw = PAK_ENTRIES[k]
-            tam_orig = len(raw)
-            fmt, dados = 0, raw
-            if (a.dxt and not a.dxt_sem_ajuste and (w % 4 or h % 4)
-                    and hh.lower() not in DXT_NUNCA):
-                raw, w, h = _ajusta_multiplo4(raw, w, h)
-                n_ajustadas += 1
-            if a.dxt and w % 4 == 0 and h % 4 == 0 and hh.lower() not in DXT_NUNCA:
-                fmt, dados = dxt_encode(raw, w, h, compacto=a.dxt_compacto)
-            cont[fmt] += 1
-            antes += tam_orig; depois += len(dados)
-            if a.dxt and fmt == 0:
-                sem_dxt.append((hh, w, h, len(raw), _PAK_SOURCE.get(hh, "")))
+        for k in ordem:
+            hh = PAK_ENTRIES[k][0]
+            w, h, fmt, dados = final[k]
             campo = fmt | (0x80000000 if k in pre_set else 0)
             index += struct.pack(">IIIIII", int(hh, 16), cur, len(dados), w, h, campo)
             blob.append(dados)
             cur += len(dados)
-            if a.dxt and n_i % 1000 == 0:
-                print(f"  {n_i}/{len(PAK_ENTRIES)}")
-        if a.dxt:
-            print(f"DXT: {cont[1]} DXT1, {cont[2]} DXT5, {cont[0]} sem compressao "
-                  f"| {antes/1024/1024:.0f} MB -> {depois/1024/1024:.0f} MB")
-            if n_ajustadas:
-                print(f"  {n_ajustadas} recorte(s) reamostrado(s) para multiplos de 4 para poder comprimir")
-            if sem_dxt:
-                _relatorio_sem_dxt(sem_dxt, outdir / "dxt_sem_compressao.txt")
         print(f"pre-carregamento dos menus: {len(pre_idx)} texturas, "
               f"{pre_bytes/1024/1024:.1f} MB (limite {PRELOAD_MB} MB)")
         with open(pak, "wb") as f:
             f.write(header); f.write(index)
             for b in blob:
                 f.write(b)
+        if REGRAS_REDUZIR or REDUZIR_AUTO[0]:
+            print(f"{N_REDUZIDAS[0]} imagem(ns) reduzida(s) (os PNGs nao foram alterados)")
         print(f"\n{n_files} imagens processadas ({n_tiles} em faixas de TMEM)")
         print(f"tex.pak: {len(PAK_ENTRIES)} texturas unicas, "
               f"{pak.stat().st_size/1024/1024:.1f} MB em UM arquivo")
@@ -886,6 +982,10 @@ def main():
         print("      baserom.us.z64")
         print("      tex.pak")
         return
+
+    if REGRAS_REDUZIR or REDUZIR_AUTO[0]:
+
+        print(f"{N_REDUZIDAS[0]} imagem(ns) reduzida(s) (os PNGs nao foram alterados)")
 
     print(f"\n{n_files} imagens processadas ({n_tiles} delas expandidas em faixas de TMEM)")
     total = list(outdir.rglob("*.tex"))

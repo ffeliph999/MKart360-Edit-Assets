@@ -197,6 +197,18 @@ Cria um único arquivo `tex.pak`. Recomendado.
 
 Gera um tex.pak comprimido utilizando o algorítmo DXT, (nativamente suportado pelo xbox360) (altamente recomendado para pacotes de textura em HD com texturas acima de 256x256 pixels)
 
+`--dxt-compacto`
+
+Gera um tex.pak comprimido no **Modo compacto (`--dxt-compacto`).** Afeta só as texturas com transparência
+"liga/desliga" (cada pixel totalmente visível ou totalmente transparente): os
+sprites dos karts e personagens, itens, árvores. Por padrão elas usam DXT5 (4
+cores por bloco 4×4 + transparência separada, 1 byte por pixel); no modo
+compacto usam DXT1 (3 cores + "transparente", meio byte por pixel). isso deixa o PAK bem menor, mas a custo de qualidade, de cor nos sprites (cerca de 1,7 dB
+  a menos nas medições): pode aparecer um leve granulado ou bordas um pouco mais
+  claras, mais perceptíveis em sprites de baixa resolução. Use se seu tex.pak convencional exceder
+270MB, pois paks maiores que isso impossibilitam de serem carregados direto na RAM, podendo causar
+problemas de desempenho se o jogo estiver em um HD mecânico.
+
 `--only PREFIX`
 
 Limita o processo a uma pasta específica ou a um subconjunto.
