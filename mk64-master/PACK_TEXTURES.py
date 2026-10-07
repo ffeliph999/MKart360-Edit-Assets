@@ -84,6 +84,49 @@ _HASH_DEDUP_COUNT = 0
 _HASH_COLLISIONS = []
 
 
+# Tamanho maximo (aprox.) para o tex.pak ser carregado INTEIRO na memoria do
+# console ao abrir o jogo (gfx_pc.c: o pak precisa caber deixando 128 MB livres;
+# num console com ~400 MB livres, isso da ~270 MB). Acima disso o jogo le do
+# disco durante as corridas, e em HD mecanico podem aparecer travadinhas.
+LIMITE_CARGA_TOTAL_MB = 270
+
+
+def aviso_tamanho_pak(tam_mb, a):
+    """Se o pak passar do limite da carga total, avisa (PT e EN) e sugere as
+    opcoes que ainda nao foram usadas, na ordem do que mais reduz."""
+    if tam_mb <= LIMITE_CARGA_TOTAL_MB:
+        return
+    sugestoes = []
+    if not a.dxt:
+        sugestoes.append(("--dxt", "comprime as texturas (4 a 8x menor)",
+                          "compresses the textures (4-8x smaller)"))
+    if not a.reduzir_auto:
+        sugestoes.append(("--reduzir-auto", "karts, menus e HUD no tamanho util para 720p",
+                          "karts, menus and HUD at the useful size for 720p"))
+    if a.dxt and not a.dxt_compacto:
+        sugestoes.append(("--dxt-compacto", "sprites com metade do tamanho",
+                          "sprites at half the size"))
+    sugestoes.append(("--reduzir PASTA=TAMANHO", "reduz uma pasta especifica (ex.: karts=128)",
+                      "reduces a specific folder (e.g. karts=128)", "--reduzir FOLDER=SIZE"))
+    print("")
+    print("  " + "!" * 72)
+    print(f"  AVISO: o tex.pak tem {tam_mb:.0f} MB, acima de ~{LIMITE_CARGA_TOTAL_MB} MB. Ele nao")
+    print("  cabe inteiro na memoria do Xbox 360, e o jogo vai ler do disco durante as")
+    print("  corridas. Se voce for jogar num HD mecanico, podem aparecer travadinhas.")
+    print("  Para diminuir o pak, tente:")
+    for opc, pt, *_ in sugestoes:
+        print(f"      {opc:<26} {pt}")
+    print("")
+    print(f"  WARNING: tex.pak is {tam_mb:.0f} MB, above ~{LIMITE_CARGA_TOTAL_MB} MB. It does not")
+    print("  fit entirely in the Xbox 360's memory, so the game will read from disk")
+    print("  during races. If you play from a mechanical HDD, small hitches may show.")
+    print("  To shrink the pack, try:")
+    for sug in sugestoes:
+        opc_en = sug[3] if len(sug) > 3 else sug[0]   # nome do formato em ingles
+        print(f"      {opc_en:<26} {sug[2]}")
+    print("  " + "!" * 72)
+
+
 # --- Reducao na hora de empacotar (--reduzir PASTA=TAMANHO) -------------------
 # Reduz as imagens de uma pasta ANTES de recortar, sem mexer nos PNGs. Ex.: em
 # 720p um sprite de kart do N64 (64x64) ocupa ate 192x192 pixels na tela, entao
@@ -969,6 +1012,7 @@ def main():
         print(f"\n{n_files} imagens processadas ({n_tiles} em faixas de TMEM)")
         print(f"tex.pak: {len(PAK_ENTRIES)} texturas unicas, "
               f"{pak.stat().st_size/1024/1024:.1f} MB em UM arquivo")
+        aviso_tamanho_pak(pak.stat().st_size / 1024 / 1024, a)
         print(f"  hashes duplicados byte-identicos deduplicados: {_HASH_DEDUP_COUNT}")
         if _HASH_COLLISIONS:
             report = outdir / "tex_hash_collisions.json"
@@ -979,7 +1023,7 @@ def main():
         print("  no console, AO LADO do MK64.xex -- NAO dentro de uma pasta tex\\.")
         print("  Estrutura correta no console:")
         print("      MK64.xex")
-        print("      baserom.us.z64")
+        print("      baserom.br.z64")
         print("      tex.pak")
         return
 
