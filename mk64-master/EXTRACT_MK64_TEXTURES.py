@@ -2401,8 +2401,9 @@ def procurar_lakitu_fora_dos_jsons(root, manifest):
 # ---------------------------------------------------------------- canonicalização segura dos aliases
 
 def canonicalize_common_hash_aliases(outdir):
-    """Remove apenas HASH__nome.png que seja byte-a-byte igual ao PNG canônico
-    de um manifest generated. Recursos sem prova de igualdade permanecem intactos.
+    """Remove aliases somente com prova exata; aliases preservados continuam
+    como arquivos editáveis e podem ser promovidos ao manifest consolidado
+    quando o assets.json fornece metadata/offset verificáveis.
     """
     generated_manifest = outdir / "generated_texture_manifest.json"
     if not generated_manifest.is_file():
@@ -2461,6 +2462,166 @@ def canonicalize_common_hash_aliases(outdir):
     (outdir / "texture_alias_manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
+
+
+def promote_kept_hash_aliases_to_manifest(root, outdir, manifest_entries, rom, region="us"):
+    """Promove apenas aliases HASH__*.png preservados e verificáveis.
+
+    O extrator pode preservar um alias quando nao existe prova byte-a-byte de
+    que ele seja duplicata do recurso canonico. Se o assets.json raiz conhece
+    esse recurso, seus offsets/dimensoes permitem transforma-lo em uma entrada
+    normal do manifest consolidado. Nenhum alias comprovadamente duplicado e
+    nenhum alias sem metadata verificavel e promovido.
+    """
+    from PIL import Image
+    alias_path = outdir / "texture_alias_manifest.json"
+    assets_path = root / "assets.json"
+    if not alias_path.is_file() or not assets_path.is_file():
+        return []
+    try:
+        report = json.loads(alias_path.read_text(encoding="utf-8"))
+        assets = json.loads(assets_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    kept = report.get("kept_hash_aliases", []) if isinstance(report, dict) else []
+    if not isinstance(kept, list) or not isinstance(assets, dict):
+        return []
+
+    existing = {(str(e.get("symbol", "")), int_value(e.get("rom_offset", 0)),
+                 int(e.get("width", 0) or 0), int(e.get("height", 0) or 0),
+                 str(e.get("format", "")).lower()) for e in manifest_entries}
+    promoted = []
+
+    def parse_fmt(name):
+        text = str(name).lower()
+        m = re.search(r"\.(rgba32|rgba16|ia16|ia8|ia4|i8|i4|ci8|ci4)(?:\.inc)?\.png$", text)
+        return m.group(1) if m else None
+
+    for rel_name in kept:
+        if not isinstance(rel_name, str):
+            continue
+        png = outdir / rel_name
+        if not png.is_file():
+            continue
+        base = Path(rel_name).name
+        if "__" not in base:
+            continue
+        source_name = base.split("__", 1)[1]
+        symbol = Path(source_name).name
+        for suffix in (".inc.png", ".png"):
+            if symbol.lower().endswith(suffix):
+                symbol = symbol[:-len(suffix)]
+                break
+        # Hash aliases carry the N64 format in the filename, e.g.
+        # common_texture_hud_lap_time.rgba16.inc.png. The runtime symbol does
+        # not; remove that format suffix after parsing it.
+        fmt = parse_fmt(source_name)
+        if fmt and symbol.lower().endswith("." + fmt):
+            symbol = symbol[:-(len(fmt) + 1)]
+        if fmt not in BPP:
+            continue
+
+        info = None
+        source_key = None
+        # assets.json uses paths as keys, while the runtime symbol is the stem.
+        for key, val in assets.items():
+            if not isinstance(key, str) or not isinstance(val, dict):
+                continue
+            key_base = Path(key).name
+            key_stem = key_base
+            for suffix in (".inc.png", ".png"):
+                if key_stem.lower().endswith(suffix):
+                    key_stem = key_stem[:-len(suffix)]
+                    break
+            if fmt and key_stem.lower().endswith("." + fmt):
+                key_stem = key_stem[:-(len(fmt) + 1)]
+            if key_stem == symbol and parse_fmt(key_base) == fmt:
+                info = val
+                source_key = key
+                break
+        if not isinstance(info, dict):
+            continue
+        dims = info.get("meta", {}).get("dims") if isinstance(info.get("meta"), dict) else None
+        if not isinstance(dims, (list, tuple)) or len(dims) < 2:
+            continue
+        try:
+            w, h = int(dims[0]), int(dims[1])
+            offsets = info.get("offsets", {})
+            pair = offsets.get(region) or offsets.get("us")
+            if not pair:
+                continue
+            rom_offset = int_value(pair[0]); block_offset = int_value(pair[1])
+        except (TypeError, ValueError, KeyError):
+            continue
+        key = (symbol, rom_offset, w, h, fmt)
+        if key in existing:
+            continue
+        needed = (w * h * BPP[fmt] + 7) // 8
+        if block_offset < 0 or needed <= 0:
+            continue
+        try:
+            with Image.open(png) as im:
+                if im.size != (w, h):
+                    continue
+        except Exception:
+            continue
+        # Recover the original decoded bytes at block_offset. For MIO0 the
+        # bytes in the ROM are compressed, so slicing the ROM directly here is
+        # incorrect. Decode the complete allocation first, exactly as the
+        # repacker does for shared blocks.
+        raw = None
+        compression = "raw"
+        try:
+            if rom is None:
+                continue
+            if rom[rom_offset:rom_offset + 4] == b"MIO0":
+                decoded_block = mio0_decode(rom[rom_offset:])
+                if block_offset + needed > len(decoded_block):
+                    continue
+                raw = decoded_block[block_offset:block_offset + needed]
+                compression = "MIO0"
+            else:
+                source = rom[rom_offset:rom_offset + block_offset + needed]
+                if len(source) < block_offset + needed:
+                    continue
+                raw = source[block_offset:block_offset + needed]
+        except Exception:
+            continue
+
+        # The hash prefix of a kept alias is the original decoded N64 payload
+        # hash. Verify it against the ROM before promoting; this prevents an
+        # unrelated manually named HASH__*.png from becoming a patch entry.
+        try:
+            expected_hash = Path(rel_name).name.split("__", 1)[0].lower()
+            if len(expected_hash) == 8 and fnv1a32(raw) != int(expected_hash, 16):
+                continue
+        except Exception:
+            continue
+        item = build_generated_manifest_entry(
+            rel_name, "asset_json.c", symbol, rom_offset, raw,
+            w, h, fmt, compression, include_tmem=False)
+        item.update({"source_json": "assets.json", "source_asset_key": source_key,
+                     "block_offset": block_offset, "asset_json_discovered": True,
+                     "kept_hash_alias_promoted": True})
+        manifest_entries.append(item)
+        existing.add(key)
+        promoted.append(item)
+
+    if promoted:
+        (outdir / "generated_texture_manifest.json").write_text(
+            json.dumps(manifest_entries, indent=1), encoding="utf-8")
+        # Keep the per-source manifest synchronized as well; it is an audit
+        # manifest, while generated_texture_manifest remains the pack source.
+        audit = outdir / "asset_json_texture_manifest.json"
+        try:
+            current = json.loads(audit.read_text(encoding="utf-8")) if audit.is_file() else []
+            if not isinstance(current, list): current = []
+            known = {(str(e.get("symbol", "")), str(e.get("png", ""))) for e in current}
+            current.extend(e for e in promoted if (str(e.get("symbol", "")), str(e.get("png", ""))) not in known)
+            audit.write_text(json.dumps(current, indent=1), encoding="utf-8")
+        except Exception:
+            pass
+    return promoted
 
 # ---------------------------------------------------------------- Fundos HD dos menus (integrado do GERAR_FUNDOS_MENU_HD/TINT_MENU_BACKGROUNDS)
 
@@ -3037,6 +3198,20 @@ def main():
         asset_manifest.extend(rainbow_frames)
         asset_manifest_path.write_text(json.dumps(asset_manifest, indent=1), encoding="utf-8")
 
+        # Reavalie os aliases preservados automaticamente também no modo
+        # continuação. Isso permite adicionar ao manifest uma textura que o
+        # usuário editou depois da extração original, sem reextrair/sobrescrever
+        # nenhum PNG existente.
+        try:
+            consolidated_now = json.loads(consolidated_path.read_text(encoding="utf-8"))
+            promoted_aliases = promote_kept_hash_aliases_to_manifest(
+                root, outdir, consolidated_now, rom,
+                a.region if a.region != "auto" else (detected_region or "us")
+            )
+            print(f"Aliases preservados promovidos ao manifest consolidado: {len(promoted_aliases)}")
+        except Exception as exc:
+            print(f"  ! promoção automática de aliases preservados falhou: {exc}")
+
         # Só depois da geração o tinted_manifest passa a ser copiado para
         # extracted_textures. Se não foi gerado, ele não é inventado.
         runtime_copied = copy_runtime_manifests(root, outdir, include_tinted=bool(generated_tinted))
@@ -3235,6 +3410,15 @@ def main():
         alias_report = canonicalize_common_hash_aliases(outdir)
         print(f"Aliases HASH duplicados removidos com prova exata: {len(alias_report.get('removed', []))}")
         print(f"Aliases HASH sem prova exata preservados: {len(alias_report.get('kept_hash_aliases', []))}")
+        # Promote only preserved aliases whose assets.json metadata and ROM
+        # offsets can be verified. This is generated automatically; no manual
+        # manifest editing is required.
+        promoted_aliases = promote_kept_hash_aliases_to_manifest(
+            root, outdir,
+            json.loads((outdir / "generated_texture_manifest.json").read_text(encoding="utf-8")),
+            rom, a.region if a.region != "auto" else (detected_region or "us")
+        )
+        print(f"Aliases preservados promovidos ao manifest consolidado: {len(promoted_aliases)}")
 
     print(f"\nOK    : {ok} texturas comuns -> {outdir}")
     print(f"Karts : {kart_count} sprites piloto+kart -> {outdir / 'karts'}")
