@@ -2699,6 +2699,10 @@ static inline struct ColorCombiner *gfx_pick_combiner(bool *out_use_fog, bool *o
     if(use_alpha)options|=SHADER_OPT_ALPHA;
     if(use_fog)options|=SHADER_OPT_FOG;
     if(texture_edge)options|=SHADER_OPT_TEXTURE_EDGE;
+    /* Boo/kart translucency uses ZMODE_XLU together with CVG_X_ALPHA.
+     * Preserve the combiner alpha for the D3D alpha blend in that mode.
+     */
+    if(rdp.other_mode_l & ZMODE_XLU)options|=SHADER_OPT_PRESERVE_ALPHA;
     if(use_noise)options|=SHADER_OPT_NOISE;
     if((rdp.other_mode_h&(3U<<G_MDSFT_CYCLETYPE))==G_CYC_2CYCLE)options|=SHADER_OPT_2CYCLE;
     struct ColorCombiner *comb=gfx_lookup_or_create_color_combiner(cc_id,options);
@@ -5146,16 +5150,10 @@ void gfx_end_frame(void) {
     if (++x360_st_frames >= 60) {
         char line[512];   /* era 200: a linha cresceu com os campos novos e, ao
                              nao caber, _snprintf devolvia -1 e nada era gravado */
-        /* memoria fisica livre do console: se cai sem parar entre corridas/copas,
-           ha texturas (GPU ou cache) acumulando ate esgotar a RAM */
-        MEMORYSTATUS livre;
-        livre.dwLength = sizeof(livre);
-        GlobalMemoryStatus(&livre);
         int n = _snprintf(line, sizeof(line) - 1,
-            "livreMB=%u pak=%u reads=%u rahit=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u "
+            "pak=%u reads=%u rahit=%u ramhit=%u evict=%u uploads=%u uploadKB=%u ramMB=%u "
             "diskMS=%u decMS=%u uploadMS=%u frameMaxMS=%u acima17ms=%u acima33ms=%u "
             "estado=%d pre=%u preTotal=%u preMB=%u preJa=%u preFim=%u grupo=%u/%u\r\n",
-            (unsigned)(livre.dwAvailPhys >> 20),
             x360_st_pak, x360_st_reads, x360_st_rahit, x360_st_ramhit, x360_st_evict,
             x360_st_up, x360_st_upkb, (unsigned)(x360_hdram_bytes >> 20),
             x360_st_disk_us / 1000, x360_st_dec_us / 1000, x360_st_up_us / 1000,

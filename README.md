@@ -122,6 +122,24 @@ without modifying the ROM or the compiled game assets, and works with **all ROM 
   <img src="assets/screenshot10.png" width="800"/>
 </p>
 
+### Boo Effect — Normal Visibility
+
+<p align="center">
+  <img src="assets/screenshot11.png" width="800"/>
+</p>
+
+### Boo Effect — Partial Transparency (70–80%)
+
+<p align="center">
+  <img src="assets/screenshot12.png" width="800"/>
+</p>
+
+### Boo Effect — Invisible to Opponent
+
+<p align="center">
+  <img src="assets/screenshot13.png" width="800"/>
+</p>
+
 ---
 
 ## New tools
