@@ -149,16 +149,17 @@ void func_8028E298(void) {
 }
 
 void func_8028E3A0(void) {
-
-    if (D_80150120) {
-
-        if (gCourseIndexInCup == COURSE_FOUR) {
-            gGotoMode = ENDING;
-        } else {
+    /*
+     * A Grand Prix cup has four courses, indexed 0 through 3.
+     * Do not advance to index 4 after the fourth race, even if the player
+     * finished outside the top four and D_80150120 is false.
+     * Preserve the original D_800DC544 behavior for both result paths.
+     */
+    if (gCourseIndexInCup >= COURSE_FOUR) {
+        if (D_80150120 == 0) {
             D_800DC544++;
-            gCourseIndexInCup++;
-            gGotoMode = RACING;
         }
+        gGotoMode = ENDING;
     } else {
         D_800DC544++;
         gCourseIndexInCup++;
