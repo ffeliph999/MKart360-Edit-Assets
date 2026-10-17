@@ -554,6 +554,25 @@ def main():
     generated = {e["png"].replace("\\", "/").lower(): e
                  for e in load_manifest(indir / "generated_texture_manifest.json")}
 
+    # Runtime-derived variants are real HD assets too. In particular, the Red
+    # Shell reuses Green Shell CI8 indices but has its own salted runtime hash.
+    # Without this manifest, the red PNGs are extracted but silently omitted
+    # from tex.pak, so the renderer can only fall back to the green HD image.
+    for e in load_manifest(indir / "runtime_derived_manifest.json"):
+        png_name = e.get("derived_png")
+        derived_hash = e.get("derived_hash_fnv1a32")
+        if png_name and derived_hash:
+            key = png_name.replace("\\", "/").lower()
+            generated.setdefault(key, {
+                "png": png_name,
+                "symbol": e.get("derived_symbol"),
+                "decoded_hash_fnv1a32": derived_hash,
+                "extra_hashes": [e["palette_hash_fnv1a32"]] if e.get("palette_hash_fnv1a32") else [],
+                "width": e.get("width"),
+                "height": e.get("height"),
+                "format": e.get("format"),
+            })
+
     # Manifests adicionais de bancos generated: fallback, sem alterar a
     # categoria principal. Se o PNG ja existe no consolidado, ele vence.
     for name in (
@@ -871,6 +890,11 @@ def main():
             print(f"  ! {rel}: {w}x{hgt} excede --max={a.max}, pulando")
             continue
         write_tex(outdir, h, img)
+        # Keep a palette-aware alias for existing XEX builds, whose renderer
+        # looks up FNV(texels || active TLUT). Newer builds also use the salted key.
+        for alias_hash in entry.get("extra_hashes", []):
+            if alias_hash and str(alias_hash).lower() != str(h).lower():
+                write_tex(outdir, alias_hash, img, f"{rel} [palette-aware alias]")
         n_files += 1
 
     # Blocos usados durante a ANIMACAO DE GIRO das imagens TKMK00 (selecao de

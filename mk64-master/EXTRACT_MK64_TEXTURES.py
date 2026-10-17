@@ -145,6 +145,40 @@ def red_shell_rgba(rgba):
     return bytes(out)
 
 
+_RED_SHELL_RUNTIME_PALETTE_BYTES = None
+
+
+def red_shell_runtime_palette_bytes():
+    """Bytes da TLUT vermelha exatamente como o renderer Xbox 360 a hasheia.
+
+    O Xbox 360 e big-endian: gfx_dp_load_tlut copia os 256 u16 de
+    gTLUTRedShell para rdp.palette_data sem conversao. O hash legado de HD
+    e FNV-1a(texels CI8 || estes 512 bytes), enquanto o hash salted e usado
+    pela correcao nova do renderer.
+    """
+    global _RED_SHELL_RUNTIME_PALETTE_BYTES
+    if _RED_SHELL_RUNTIME_PALETTE_BYTES is not None:
+        return _RED_SHELL_RUNTIME_PALETTE_BYTES
+
+    palette_path = (Path(__file__).resolve().parent / "assets" / "code" /
+                    "common_data" / "common_tlut_green_shell.rgba16.inc.c")
+    values = [int(value, 16) for value in
+              re.findall(r"0x([0-9A-Fa-f]{4})", palette_path.read_text(encoding="utf-8"))]
+    if len(values) != 256:
+        raise ValueError(f"Expected 256 green-shell TLUT entries, found {len(values)}")
+
+    out = bytearray()
+    for color in values:
+        red_color = color & 0xF800
+        green_color = color & 0x07C0
+        blue_color = color & 0x003E
+        alpha_color = color & 0x0001
+        red_color = (red_color >> 5) | (green_color << 5) | blue_color | alpha_color
+        out.extend(red_color.to_bytes(2, "big"))
+    _RED_SHELL_RUNTIME_PALETTE_BYTES = bytes(out)
+    return _RED_SHELL_RUNTIME_PALETTE_BYTES
+
+
 def tmem_halves_for(pixels, w, h=None, is_kart=False):
     """Calcula os dois blocos de carregamento no TMEM do N64 (com 1 linha de sobreposição).
 
@@ -1610,6 +1644,9 @@ def extract_generated_textures(root, rom, outdir, cache, asset_json_symbols, rec
                 "derived_kind": "red_shell",
                 "derived_hash_fnv1a32": f"{red_shell_hd_hash(data[:needed]):08x}",
                 "source_hash_fnv1a32": f"{fnv1a32(data[:needed]):08x}",
+                # Compatibility key for existing XEX builds: their HD loader
+                # hashes CI8 texels followed by the active 256-entry TLUT.
+                "palette_hash_fnv1a32": f"{fnv1a32(data[:needed] + red_shell_runtime_palette_bytes()):08x}",
                 "rom_offset": f"0x{recipe_rom_offset:X}",
                 "width": w,
                 "height": h,

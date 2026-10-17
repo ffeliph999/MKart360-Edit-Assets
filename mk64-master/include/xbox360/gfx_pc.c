@@ -30,7 +30,10 @@ static uintptr_t rspSegments[16];
 #include "netplay_view.h"
 #include "online_hud.h"
 int x360_gfx_online_hud = 0;
-extern "C" { extern int gGamestate,gActiveScreenMode,gPlayerCountSelection1; }
+extern "C" {
+extern int gGamestate,gActiveScreenMode,gPlayerCountSelection1;
+extern uint16_t gTLUTRedShell[256];
+}
 #include "gfx_cc.h"
 #include "gfx_window_manager_api.h"
 #include "gfx_rendering_api.h"
@@ -206,6 +209,9 @@ struct X360TextureTile {
 
 static struct RDP {
     const uint8_t *palette;
+    /* Source identity is retained so the shared Green/Red Shell CI8 indices
+     * can select the correct HD variant when the red TLUT is active. */
+    const uint8_t *palette_source_addr;
     uint8_t palette_data[512]; /* RDP TLUT storage, independent of source RAM. */
     uint32_t palette_generation, palette_bytes;
     /* B17G6D: palette hash captured exactly at LOADTLUT. */
@@ -263,6 +269,18 @@ static unsigned x360_texture_initial_count, x360_texture_lakitu_count, x360_text
 static uint32_t x360_texture_seen[16][2];
 static uint32_t x360_texture_hash(const uint8_t *data, uint32_t size) {
     uint32_t h = 2166136261U;
+    for (uint32_t i = 0; i < size; ++i) h = (h ^ data[i]) * 16777619U;
+    return h;
+}
+
+/* Must match RED_SHELL_HD_SALT/red_shell_hd_hash() in EXTRACT_MK64_TEXTURES.py.
+ * The red shell shares the green shell's CI8 texels, so palette-independent
+ * hashes collide unless the active TLUT selects a separate identity. */
+static uint32_t x360_red_shell_hd_hash(const uint8_t *data, uint32_t size) {
+    static const uint8_t salt[] = "MK64_X360_RED_SHELL"; /* includes trailing NUL */
+    uint32_t h = 2166136261U;
+    if (!data) return 0;
+    for (uint32_t i = 0; i < sizeof(salt); ++i) h = (h ^ salt[i]) * 16777619U;
     for (uint32_t i = 0; i < size; ++i) h = (h ^ data[i]) * 16777619U;
     return h;
 }
@@ -2130,7 +2148,12 @@ static void import_texture(int tile) {
        node->width/height NAO sao tocados aqui. */
     {
         uint32_t hd_hash = x360_texture_hash(source, source_size);
+        uint32_t hd_red_shell_hash = 0;
         uint32_t hd_logical_hash = 0;
+        if (fmt == G_IM_FMT_CI && siz == G_IM_SIZ_8b &&
+            rdp.palette_source_addr == (const uint8_t *)gTLUTRedShell) {
+            hd_red_shell_hash = x360_red_shell_hd_hash(source, source_size);
+        }
         /* Texturas CI com paleta completa (256 cores): hash de pixels + paleta.
            Animacoes por troca de paleta (os neons da Rainbow Road) usam os
            MESMOS pixels em todos os quadros; so a paleta muda. Com o hash so
@@ -2184,21 +2207,30 @@ static void import_texture(int tile) {
            cada quadro se so o hash completo -- que muda com o "lixo" depois
            da imagem -- fosse comparado. */
         if (node->x360_hd_loaded != 0 &&
-            (node->x360_hd_loaded == hd_hash ||
-             (hd_pal_hash != 0 && node->x360_hd_loaded == hd_pal_hash) ||
-             (hd_logical_hash != 0 && node->x360_hd_loaded == hd_logical_hash))) {
+            (hd_red_shell_hash
+                 ? node->x360_hd_loaded == hd_red_shell_hash
+                 : (node->x360_hd_loaded == hd_hash ||
+                    (hd_pal_hash != 0 && node->x360_hd_loaded == hd_pal_hash) ||
+                    (hd_logical_hash != 0 && node->x360_hd_loaded == hd_logical_hash)))) {
             return;
         }
         bool hd_found = false;
         uint32_t hd_used_hash = hd_hash;
-        if (hd_pal_hash) {
-            hd_found = x360_try_load_hd_texture(hd_pal_hash);
-            if (hd_found) hd_used_hash = hd_pal_hash;
-        }
-        if (!hd_found) hd_found = x360_try_load_hd_texture(hd_hash);
-        if (!hd_found && hd_logical_hash) {
-            hd_found = x360_try_load_hd_texture(hd_logical_hash);
-            if (hd_found) hd_used_hash = hd_logical_hash;
+        if (hd_red_shell_hash) {
+            /* Never fall back to the green-shell HD image for a red shell: if
+             * its derived asset is absent/pending, keep the correct native TLUT. */
+            hd_found = x360_try_load_hd_texture(hd_red_shell_hash);
+            if (hd_found) hd_used_hash = hd_red_shell_hash;
+        } else {
+            if (hd_pal_hash) {
+                hd_found = x360_try_load_hd_texture(hd_pal_hash);
+                if (hd_found) hd_used_hash = hd_pal_hash;
+            }
+            if (!hd_found) hd_found = x360_try_load_hd_texture(hd_hash);
+            if (!hd_found && hd_logical_hash) {
+                hd_found = x360_try_load_hd_texture(hd_logical_hash);
+                if (hd_found) hd_used_hash = hd_logical_hash;
+            }
         }
 
         /* TKMK00 texture_ok e carregada em dois G_LOADTILEs horizontais.
@@ -3291,6 +3323,9 @@ static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
     uint32_t count = high_index + 1;
     if (count > 256 - first) count = 256 - first;
     memcpy(rdp.palette_data + first * 2, rdp.texture_to_load.addr, count * 2);
+    /* Only a full 256-entry load establishes a reliable TLUT identity. */
+    rdp.palette_source_addr = (first == 0 && count == 256)
+        ? rdp.texture_to_load.addr : NULL;
     rdp.palette = rdp.palette_data;
     rdp.palette_bytes = sizeof(rdp.palette_data);
     ++rdp.palette_generation;
