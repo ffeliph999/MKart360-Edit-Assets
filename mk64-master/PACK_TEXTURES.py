@@ -261,6 +261,14 @@ def aplicar_geometria(geo_path, generated):
     por_simbolo = {e.get("symbol"): k for k, e in generated.items()}
     feitos = 0
     for simbolo, info in doc.get("images", {}).items():
+        # Molduras de selecao: tmem_tiles do manifesto sao a fonte autoritativa
+        # (quatro faixas 64x16 validadas contra a ROM). Nao sobrescrever com
+        # geometria duplicada; a geometria fica documentada no JSON.
+        if simbolo in {
+            "gTextureP1BorderBlue", "gTextureP2BorderRed",
+            "gTextureP3BorderOrange", "gTextureP4BorderGreen"
+        }:
+            continue
         chave = por_simbolo.get(simbolo)
         corpo = arrays.get(simbolo)
         if chave is None or corpo is None:
@@ -862,6 +870,37 @@ def main():
             n_files += 1
             continue
 
+        # Molduras da selecao de personagens: a ROM carrega cada moldura
+        # em quatro tiles de 64x16 por causa do limite de TMEM. Mantemos a
+        # entrada da imagem inteira (para o caminho HD de quad completo) E
+        # publicamos os quatro hashes reais de tile calculados pelo extrator.
+        # Nao usar menu_tiles_geometry.json para essas quatro imagens: sua
+        # geometria antiga tinha apenas tres faixas sobrepostas.
+        if entry and entry.get("symbol") in {
+            "gTextureP1BorderBlue", "gTextureP2BorderRed",
+            "gTextureP3BorderOrange", "gTextureP4BorderGreen"
+        } and entry.get("tmem_tiles"):
+            full_hash = entry.get("decoded_hash_fnv1a32")
+            if full_hash:
+                write_tex(outdir, full_hash, img, f"{rel} [character border full image]")
+            orig_w = int(entry.get("width", w))
+            orig_h = int(entry.get("height", hgt))
+            for i, t in enumerate(entry["tmem_tiles"]):
+                x0 = round(int(t.get("x0", 0)) / orig_w * w)
+                x1 = round(int(t.get("x1", orig_w) / orig_w * w))
+                y0 = round(int(t.get("y0", 0)) / orig_h * hgt)
+                y1 = round(int(t.get("y1", orig_h) / orig_h * hgt))
+                x0 = max(0, min(x0, w - 1)); x1 = max(x0 + 1, min(x1, w))
+                y0 = max(0, min(y0, hgt - 1)); y1 = max(y0 + 1, min(y1, hgt))
+                crop = img.crop((x0, y0, x1, y1))
+                tile_hash = t.get("hash")
+                if tile_hash and crop.width <= a.max and crop.height <= a.max:
+                    write_tex(outdir, tile_hash, crop,
+                              f"{rel} [character border TMEM tile {i}]")
+                    n_tiles += 1
+            n_files += 1
+            continue
+
         if a.tiles and entry and entry.get("tmem_tiles"):
             orig_h = int(entry["height"])
             tiles = entry["tmem_tiles"]
@@ -892,7 +931,10 @@ def main():
         write_tex(outdir, h, img)
         # Keep a palette-aware alias for existing XEX builds, whose renderer
         # looks up FNV(texels || active TLUT). Newer builds also use the salted key.
-        for alias_hash in entry.get("extra_hashes", []):
+        # PNGs com prefixo de hash (8 hexadecimais + "__") podem ser
+        # empacotados mesmo sem uma entrada correspondente no manifest.
+        # Nesse caso, nao existem aliases de paleta para gravar.
+        for alias_hash in (entry.get("extra_hashes", []) if entry else []):
             if alias_hash and str(alias_hash).lower() != str(h).lower():
                 write_tex(outdir, alias_hash, img, f"{rel} [palette-aware alias]")
         n_files += 1
