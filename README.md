@@ -140,6 +140,24 @@ without modifying the ROM or the compiled game assets, and works with **all ROM 
   <img src="assets/screenshot13.png" width="800"/>
 </p>
 
+### red hulls after fix for HD textures
+
+<p align="center">
+  <img src="assets/screenshot14.png" width="800"/>
+</p>
+
+### character selection frames beforehand
+
+<p align="center">
+  <img src="assets/screenshot15.png" width="800"/>
+</p>
+
+### character selection frames later
+
+<p align="center">
+  <img src="assets/screenshot16.png" width="800"/>
+</p>
+
 ---
 
 ## New tools
