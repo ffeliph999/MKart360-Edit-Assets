@@ -1,5 +1,8 @@
 #include "canonical_gameplay.h"
 #include "xbox360/race8.h"
+#ifdef XBOX360_PORT
+#include "xbox360/assets.h"
+#endif
 #include <ultra64.h>
 #include <macros.h>
 #include <PR/os.h>
@@ -1224,7 +1227,15 @@ void init_actors_and_load_textures(void) {
     dma_textures(gTextureFinishLineBanner5, 0x0000031EU, 0x00000800U);
     dma_textures(gTextureFinishLineBanner6, 0x0000036EU, 0x00000800U);
     dma_textures(gTextureFinishLineBanner7, 0x0000029CU, 0x00000800U);
+#ifdef XBOX360_PORT
+    /* O pedaco 8 da placa de chegada (MIO0) precisa de ~618 bytes, mas o jogo so carregava 0x25B (603).
+     * Os bytes finais vinham de lixo do heap: o canto inferior direito saia corrompido e o hash nao
+     * batia com o do tex.pak (be40c045), entao o HD nunca era usado. Le direto da ROM carregada em
+     * memoria (offset 0x69811C), independente do banco gerado, que o PUBLIC_PREPARE regera com 603 bytes. */
+    dma_textures(x360_rom + 0x69811C, 0x00000270U, 0x00000800U);
+#else
     dma_textures(gTextureFinishLineBanner8, 0x0000025BU, 0x00000800U);
+#endif
     dma_textures(gTexture671A88, 0x00000400U, 0x00000800U);
     dma_textures(gTexture6774D8, 0x00000400U, 0x00000800U);
 #if !ENABLE_CUSTOM_COURSE_ENGINE

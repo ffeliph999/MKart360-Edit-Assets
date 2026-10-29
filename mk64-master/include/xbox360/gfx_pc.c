@@ -3589,7 +3589,12 @@ static void gfx_dp_set_env_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     rdp.env_color.a = a;
 }
 
+/* Verdadeiro entre um SetFillColor e o proximo FillRectangle: o jogo (ex.: select_framebuffer)
+ * usa a fill color mesmo quando o ciclo ficou em 1CYCLE. Boxes (draw_box) usam PrimColor. */
+static bool x360_fill_color_pending;
+
 static void gfx_dp_set_prim_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    x360_fill_color_pending = false;
     rdp.prim_color.r = r;
     rdp.prim_color.g = g;
     rdp.prim_color.b = b;
@@ -3605,6 +3610,7 @@ static void gfx_dp_set_fog_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 }
 
 static void gfx_dp_set_fill_color(uint32_t packed_color) {
+    x360_fill_color_pending = true;
     uint16_t col16 = (uint16_t)packed_color;
     uint32_t r = col16 >> 11;
     uint32_t g = (col16 >> 6) & 0x1f;
@@ -4047,6 +4053,7 @@ extern "C" int x360_try_draw_hd_menu_quad(const uint8_t *fullImageSource, uint32
 static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry) {
     if (rdp.color_image_address == rdp.z_buf_address) {
         // Don't clear Z buffer here since we already did it with glClear
+        x360_fill_color_pending = false;
         return;
     }
     uint32_t mode = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE));
@@ -4057,8 +4064,14 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
         lry += 1 << 2;
     }
 
+    /* MK64: 1CYCLE/2CYCLE (draw_box do flash do raio) usa o combiner/PrimColor atuais;
+     * so FILL/COPY usa a fill color. Antes o retangulo do flash saia preto opaco (fill color). */
+    const bool x360_rect_uses_combiner = (mode != G_CYC_COPY && mode != G_CYC_FILL) && !x360_fill_color_pending;
+    x360_fill_color_pending = false;
     const uint64_t saved_combine_mode = rdp.combine_mode;
-    gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_SHADE), alpha_comb(7, 7, 7, G_ACMUX_SHADE));
+    if (!x360_rect_uses_combiner) {
+        gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_SHADE), alpha_comb(7, 7, 7, G_ACMUX_SHADE));
+    }
 
     if (gfx_rapi->fill_rect) {
         float ulxf = ulx * ratio_x;
@@ -4074,7 +4087,7 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
     } else {
         for (int i = MAX_VERTICES; i < MAX_VERTICES + 4; i++) {
             struct LoadedVertex* v = &rsp.loaded_vertices[i];
-            v->color = rdp.fill_color;
+            v->color = x360_rect_uses_combiner ? rdp.prim_color : rdp.fill_color;
         }
         gfx_draw_rectangle(ulx, uly, lrx, lry, false);
     }

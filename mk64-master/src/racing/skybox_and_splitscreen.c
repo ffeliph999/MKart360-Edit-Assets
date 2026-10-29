@@ -610,11 +610,21 @@ void func_802A4300(void) {
             gDPFillRectangle(gDisplayListHead++, 157, 0, 159, 239);
             break;
         case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
+#ifdef XBOX360_PORT
+            /* Em 16:9 widescreen HD (1280x720), gfx_draw_rectangle() comprime X por 0.75x.
+             * Estendemos com a mesma margem do skybox (54px) para cobrir 100% da tela. */
+            gDPFillRectangle(gDisplayListHead++, -(SCREEN_WIDTH + 5) / 6, 119, SCREEN_WIDTH + (SCREEN_WIDTH + 5) / 6 - 1, 121);
+#else
             gDPFillRectangle(gDisplayListHead++, 0, 119, 319, 121);
+#endif
             break;
         case SCREEN_MODE_3P_4P_SPLITSCREEN:
             gDPFillRectangle(gDisplayListHead++, 157, 0, 159, 239);
+#ifdef XBOX360_PORT
+            gDPFillRectangle(gDisplayListHead++, -(SCREEN_WIDTH + 5) / 6, 119, SCREEN_WIDTH + (SCREEN_WIDTH + 5) / 6 - 1, 121);
+#else
             gDPFillRectangle(gDisplayListHead++, 0, 119, 319, 121);
+#endif
             break;
     }
     gDPPipeSync(gDisplayListHead++);
@@ -851,15 +861,29 @@ void render_skybox(Vtx* skybox, struct UnkStruct_800DC5EC* arg1, UNUSED s32 arg2
                  lookAndProjMtx[3][3];
     mtxf_transform_vec3f_mat4(horizonPoint, lookAndProjMtx);
 
-    homogFactor = (1.0 / homogScale);
+    /* Correcao Bug do Raio (Ceu Preto):
+     * Durante o giro do kart no raio (LIGHTNING_STRIKE_EFFECT), o ponto de ancoragem
+     * do horizonte (0, 0, 30000) pode cruzar o plano traseiro da camera (homogScale <= 0).
+     * Quando homogScale se aproxima de zero ou fica negativo, a divisao explode ou inverte,
+     * jogando horizonRow para fora da tela (< 0 ou > 240). Isso causa rejeicao de clipping
+     * (CLIP_TOP/CLIP_BOTTOM) nos quads da skybox, revelando o fundo preto limpo pelo select_framebuffer().
+     * Protegemos contra homogScale <= 0 e travamos horizonRow estritamente nos limites do viewport. */
+    if (homogScale > 0.01f) {
+        homogFactor = (1.0f / homogScale);
+        horizonPoint[0] *= homogFactor;
+        horizonPoint[1] *= homogFactor;
+        horizonPoint[0] *= 160.0f; // SCREEN_WIDTH / 2
+        horizonPoint[1] *= 120.0f; // SCREEN_HEIGHT / 2
+        horizonRow = 120 - (s16) horizonPoint[1];
+    } else {
+        horizonRow = 120;
+    }
 
-    horizonPoint[0] *= homogFactor;
-    horizonPoint[1] *= homogFactor;
-
-    horizonPoint[0] *= 160.0f; // SCREEN_WIDTH / 2
-    horizonPoint[1] *= 120.0f; // SCREEN_HEIGHT / 2
-
-    horizonRow = 120 - (s16) horizonPoint[1];
+    if (horizonRow < 0) {
+        horizonRow = 0;
+    } else if (horizonRow > SCREEN_HEIGHT) {
+        horizonRow = SCREEN_HEIGHT;
+    }
     arg1->cameraHeight = horizonRow;
 
     skybox[1].v.ob[1] = horizonRow;

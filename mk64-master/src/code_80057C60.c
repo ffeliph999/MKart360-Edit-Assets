@@ -48,6 +48,17 @@
 
 #include "camera.h"
 #include "code_80057C60.h"
+
+/* Chaves de DIAGNOSTICO (padrao 0 = comportamento original, nada muda).
+ * Para isolar o ceu preto, compile com 1 UMA por vez e use o raio:
+ *   MK64_DIAG_SKIP_LIGHTNING_BOLT   -> nao desenha o raio (func_80066BAC)
+ *   MK64_DIAG_SKIP_LIGHTNING_KART_FX-> nao desenha o efeito no kart (func_80068724) */
+#ifndef MK64_DIAG_SKIP_LIGHTNING_BOLT
+#define MK64_DIAG_SKIP_LIGHTNING_BOLT 0
+#endif
+#ifndef MK64_DIAG_SKIP_LIGHTNING_KART_FX
+#define MK64_DIAG_SKIP_LIGHTNING_KART_FX 0
+#endif
 #include "main.h"
 #include "actors.h"
 #include "code_800029B0.h"
@@ -5421,6 +5432,9 @@ void func_80066BAC(Player* player, UNUSED s8 arg1, s16 arg2, s8 arg3) {
     Vec3s spD4;
     UNUSED s32 stackPadding;
 
+#if MK64_DIAG_SKIP_LIGHTNING_BOLT
+    return;
+#endif
     if ((player->particlePool0[arg2].isAlive == 1) && (player->particlePool0[arg2].red != 0x00FF)) {
 
         if (player->collision.surfaceDistance[2] >= 300.0f) {
@@ -5445,12 +5459,12 @@ void func_80066BAC(Player* player, UNUSED s8 arg1, s16 arg2, s8 arg3) {
             gDPLoadTextureBlock(gDisplayListHead++, gTextureLoadedLightningBolt0, G_IM_FMT_IA, G_IM_SIZ_8b, 32, 64, 0,
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
-            gSPVertex(gDisplayListHead++, &D_800E8900[0][player->particlePool0[arg2].red], 4, 0);
+            gSPVertex(gDisplayListHead++, &D_800E8900[0][0], 4, 0);
             gSPDisplayList(gDisplayListHead++, common_square_plain_render);
             gDPLoadTextureBlock(gDisplayListHead++, gTextureLoadedLightningBolt1, G_IM_FMT_IA, G_IM_SIZ_8b, 32, 64, 0,
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
-            gSPVertex(gDisplayListHead++, &D_800E8900[1][player->particlePool0[arg2].red], 4, 0);
+            gSPVertex(gDisplayListHead++, &D_800E8900[1][0], 4, 0);
             gSPDisplayList(gDisplayListHead++, D_0D008DA0);
         } else {
             gSPDisplayList(gDisplayListHead++, D_0D008DB8);
@@ -5459,12 +5473,12 @@ void func_80066BAC(Player* player, UNUSED s8 arg1, s16 arg2, s8 arg3) {
             gDPLoadTextureBlock(gDisplayListHead++, gTextureLoadedLightningBolt1, G_IM_FMT_IA, G_IM_SIZ_8b, 32, 64, 0,
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
-            gSPVertex(gDisplayListHead++, &D_800E8900[0][player->particlePool0[arg2].red], 4, 0);
+            gSPVertex(gDisplayListHead++, &D_800E8900[0][0], 4, 0);
             gSPDisplayList(gDisplayListHead++, common_square_plain_render);
             gDPLoadTextureBlock(gDisplayListHead++, gTextureLoadedLightningBolt0, G_IM_FMT_IA, G_IM_SIZ_8b, 32, 64, 0,
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
-            gSPVertex(gDisplayListHead++, &D_800E8900[1][player->particlePool0[arg2].red], 4, 0);
+            gSPVertex(gDisplayListHead++, &D_800E8900[1][0], 4, 0);
             gSPDisplayList(gDisplayListHead++, D_0D008DA0);
         }
         gMatrixEffectCount += 1;
@@ -5666,6 +5680,9 @@ void func_80068724(Player* player, UNUSED s8 arg1, UNUSED f32 arg2, s8 arg3, s8 
     Vec3f sp84;
     Vec3s sp7C;
 
+#if MK64_DIAG_SKIP_LIGHTNING_KART_FX
+    return;
+#endif
     if (player->particlePool2[arg4].isAlive == 1) {
         sp84[1] = player->pos[1] - 3.0f;
         sp84[2] = player->pos[2] + (coss(player->unk_048[arg3]) * -10.0f);
@@ -6684,7 +6701,9 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
                         if (screenId == playerId) {
                             func_80066BAC(player, playerId, var_s2, screenId);
                         }
-                    } else if (screenId == playerId || X360_SHARED_EFFECTS) {
+                    } else {
+                        /* Raio tambem nos karts dos outros jogadores/CPUs (igual ao case 1);
+                         * a restricao screenId == playerId escondia o raio de quem nao e a camera. */
                         func_80066BAC(player, playerId, var_s2, screenId);
                     }
                     break;

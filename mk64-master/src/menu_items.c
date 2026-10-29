@@ -745,7 +745,7 @@ const s8 D_800F0B54[] = { 0x20, 0x0f, 0x18, 0x2c };
 RGBA16 D_800E7AC8[] = {
     { 0x00, 0x00, 0x00, 0x00 },
     { 0xff, 0xff, 0xff, 0xff },
-    { 0x00, 0x00, 0x50, 0xff },
+    { 0xb4, 0xd2, 0xff, 0x90 }, /* azul claro e translucido: flash discreto, raio em foco */
     { 0xff, 0xff, 0xff, 0xff },
 };
 
@@ -4509,11 +4509,22 @@ Gfx* print_letter(Gfx* arg0, MenuTexture* glyphTexture, f32 arg2, f32 arg3, s32 
         var_v0 = 0;
 
         thing0 = var_s0->dX + arg2;
+#ifdef XBOX360_PORT
+        /* Textos em portugues passam de 320 unidades; o corte do N64 (320) apagava a ultima
+         * letra (ex.: "TENTAR NOVAMENTE"). A tela do port e mais larga que 4:3, entao
+         * so descartamos o que esta bem fora da tela. */
+        if (thing0 > 480.0f) {
+#else
         if (thing0 > 320.0f) {
+#endif
             var_v0 = 1;
         }
         thing0 += var_s0->width * scaleX;
+#ifdef XBOX360_PORT
+        if (thing0 < -160.0f) {
+#else
         if (thing0 < 0.0f) {
+#endif
             var_v0 += 1;
         }
         thing1 = var_s0->dY + arg3;
